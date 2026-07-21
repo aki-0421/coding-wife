@@ -237,6 +237,7 @@ export interface PresenceDirectionEventV1 {
   readonly workspaceId: string
   readonly workspaceGeneration: number
   readonly sourceEventId: string
+  readonly decisionId: string | null
   readonly trigger: PresenceDirectionTrigger
   readonly locale: NarrationLocale
   readonly utterance: string
@@ -727,6 +728,7 @@ function isPresenceDirectionUtterance(value: unknown): value is string {
     !privateTextPatterns.some((pattern) => pattern.test(value)) &&
     !/(?:https?|file|ftp):|www\./iu.test(value) &&
     !value.includes("<external>") &&
+    !/\[redacted\]/iu.test(value) &&
     !presenceDirectionBareFilenamePattern.test(value) &&
     !presenceDirectionCodeOrDiffPatterns.some((pattern) =>
       pattern.test(value),
@@ -1009,6 +1011,7 @@ const presenceDirectionEventKeys = [
   "workspaceId",
   "workspaceGeneration",
   "sourceEventId",
+  "decisionId",
   "trigger",
   "locale",
   "utterance",
@@ -1032,6 +1035,9 @@ export function parsePresenceDirectionEvent(
     value.workspaceGeneration < 1 ||
     !isOpaqueId(value.sourceEventId) ||
     !isPresenceDirectionTrigger(value.trigger) ||
+    (value.trigger === "decision_wait"
+      ? !isOpaqueId(value.decisionId)
+      : value.decisionId !== null) ||
     !isLocale(value.locale) ||
     !isPresenceDirectionUtterance(value.utterance) ||
     !isPresenceDirectionCue(value.cue) ||
@@ -1050,6 +1056,7 @@ export function parsePresenceDirectionEvent(
     workspaceId: value.workspaceId,
     workspaceGeneration: value.workspaceGeneration,
     sourceEventId: value.sourceEventId,
+    decisionId: value.decisionId as string | null,
     trigger: value.trigger,
     locale: value.locale,
     utterance: value.utterance,

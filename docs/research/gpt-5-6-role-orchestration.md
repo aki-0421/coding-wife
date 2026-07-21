@@ -55,7 +55,7 @@ Lunaへ渡すmodel inputは次のexact objectだけである。correlation IDと
 | `elapsedBucket` | `none`, `45s_plus`, `120s_plus`。`long_milestone`以外では`none` |
 | `messageExcerpt` | `main_message`でのみ必須。trim済み単一行の1〜240 Unicode scalar。他triggerではfield自体を含めない |
 
-`messageExcerpt`はlive App Server notificationからnormalizedされた`CodexEventPayload::AgentMessageCompleted`の完了済み本文だけから作る。workspace history、DB hydration、session restore、streaming delta、reasoning、tool argument、tool output、raw diff、code blockをsourceにしない。presence専用sanitizerはcredential/private token、absolute/relative path、bare filenameを含むfile/path alias、URL、workspace/repository名、redaction marker、code/diff formを除去し、空白を単一spaceへ畳み、Unicode scalar単位で上限を適用する。privacy scanを通過する内容が残らなければ候補を生成しない。model boundary validatorもsanitizerから独立して、複数space・改行を含む非正規形、code fence、diff header/hunk、代表的なcode form、private materialを拒否する。
+`messageExcerpt`はlive App Server notificationからnormalizedされた`CodexEventPayload::AgentMessageCompleted`の完了済み本文だけから作る。workspace history、DB hydration、session restore、streaming delta、reasoning、tool argument、tool output、raw diff、code blockをsourceにしない。presence専用sanitizerはcredential/private token、absolute/relative path、bare filenameを含むfile/path alias、URL、workspace/repository名、redaction marker、code/diff formを除去し、空白を単一spaceへ畳み、Unicode scalar単位で上限を適用する。native schedulerは、信頼済みworkspace registrationから得たalias、canonical root basename、GitHub repositoryの`owner/name`・`owner`・`name`をcase-insensitiveかつseparator-normalizedなdeny termsとしてscope内だけに保持し、Frontend requestにもmodel inputにも含めない。messageがこのdeny termsのいずれかを含む場合は候補全体を破棄する。privacy scanを通過する内容が残らなければ候補を生成しない。model boundary validatorもsanitizerから独立して、workspace/repository deny term、複数space・改行を含む非正規形、`/`または`\\`を含むrelative/absolute path、dotfile、bare filename、redaction marker、code fence、diff header/hunk、代表的なcode form、private materialを拒否する。
 
 `main_message`以外の入力へuser/assistant text、tool名、command、tool output、diff、file/path alias、commit message、decision question/option、error message、raw protocol、raw reasoning、absolute/relative path、URL、secret、credential、workspace/repository名を含めない。triggerはnormalized `CodexEvent`またはnative verified-commit proofから決定論的に投影し、`main_message`以外の文字列をmodel向けsummaryへ変換しない。
 
@@ -103,6 +103,8 @@ priorityは`decision_wait` > `terminal_failure` > `recoverable_failure` > `main_
 
 `long_milestone`はturn開始45秒後に一度だけ候補化し、まだactiveなら120秒後に一度だけ再候補化する。新しいworkspace generation、workspace切替、明示的なturn stop/interruption、失敗・cancel terminal、app closeでactiveとqueued requestをstale化する。正常なturn completionだけは直前までに受理した`main_message` FIFOを保持し、各messageの後に`turn_completed`を処理する。Support runtimeのrelease verification、sandbox probe、isolation probe、runtime初期化を含む構築開始時点からcancel tokenとprocess ownershipを登録し、通常終了は5秒以内、force cleanupは500ms以内にprocess treeとprivate run directoryを収束させる。force cleanupではmain runtime、main work unit、Luna runtimeを同時に停止し、各componentの失敗を保ったまま全体deadlineへ合成する。security probeをskipまたは弱化してはならない。late responseをevent、caption、cue、TTSへ適用せず、decision解決後のlate `decision_wait`も同様に破棄する。
 
+Frontendで公開済みの`decision_wait`は対応する`pending_request_resolved`を受けた時点でcaption、cue、TTSを明示的にdismissし、同じgenerationの次のvalid presence eventを受理できる状態へ戻す。`decision_wait`は対応decisionが未解決の間だけ高priorityを保持する。failureなどdecision以外のpresenceはcaption/TTSのactive window中だけ低priority eventを遮断し、speechが`idle`、`off`、`muted`、`unavailable`のいずれかへterminal化した後は次のvalid eventで置換できる。表示済みcaptionのpriorityをgeneration終了まで保持して後続eventを永久に拒否してはならない。
+
 verified commitの`commit_ready`は、main work unit、repository identity、before/current HEAD、exact commit SHAをnativeが検証した後だけ候補化する。App Server text、raw JavaScript、tool output、HEAD差分単体をtriggerにしない。
 `commit_ready`は正常完了したwork unitのterminal proof内で確定するため、その直後の同じ`turn_completed`通知だけではstale化しない。failed、stop、interruption、cancelで終わったwork unitからは`commit_ready`を候補化せず、既存候補も通常どおりstale化する。
 
@@ -119,6 +121,7 @@ interface PresenceDirectionEventV1 {
   readonly workspaceId: string
   readonly workspaceGeneration: number
   readonly sourceEventId: string
+  readonly decisionId: string | null
   readonly trigger:
     | "decision_wait"
     | "recoverable_failure"
@@ -143,7 +146,7 @@ interface PresenceDirectionEventV1 {
 }
 ```
 
-Frontendはactive workspace ID、実Codex generation、latest request ID、localeをevent受理直前と描画直前に照合する。mismatch、duplicate、unknown field、rollback generationは破棄する。Luna eventをmain Chat timeline、main conversation、commit evidence、workspace historyへ追加しない。
+`decisionId`は`decision_wait`だけで必須となるopaque pending IDで、その他triggerでは`null`とする。Frontendはactive workspace ID、実Codex generation、latest request ID、localeをevent受理直前と描画直前に照合する。mismatch、duplicate、unknown field、rollback generationは破棄する。Luna eventをmain Chat timeline、main conversation、commit evidence、workspace historyへ追加しない。
 
 captionの優先順位は、明示的なcommit explanation presentation > Lunaの`decision_wait` / failure > Lunaの`main_message` > Lunaの`commit_ready` / completion > Lunaのmilestoneとする。Luna captionは既存のLuna captionだけを置換し、active commit explanationを閉じたり上書きしたりしない。commit explanation開始時はLuna captionとLuna speechをstale化する。decision card、error banner、commit evidence、deterministic character stateをcaptionで置換しない。
 
@@ -164,10 +167,10 @@ Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation�
 最低限、次を独立したtestで固定する。
 
 1. Sol/Terra/Lunaのconfig、thread、turn、response、wire、auditが各exact modelと一致し、cross-role modelとfallbackを拒否する。
-2. `main_message` excerptがlive完了済みnormalized `agentMessage`だけから生成され、history/hydration、delta、reasoning、tool argument/output、code/diff、path、URL、secretを除去し、single-space正規形、240 scalar上限、条件付きfieldをproducerとmodel boundary validatorの両方でfail closedに検証する。
-3. Luna outputのunknown field、wrong locale、overlong/control/private text、disallowed cueを拒否する。
+2. `main_message` excerptがlive完了済みnormalized `agentMessage`だけから生成され、history/hydration、delta、reasoning、tool argument/output、code/diff、`foo/bar`・Windows separatorを含むpath、dotfile、`secrets.txt`等のbare filename、URL、secret、`[redacted]` marker、workspace alias、root basename、repository owner/nameを除去し、single-space正規形、240 scalar上限、条件付きfieldをproducerと独立したmodel boundary validatorの両方でfail closedに検証する。
+3. Luna outputのunknown field、wrong locale、overlong/control/path・filename・redaction markerを含むprivate text、disallowed cueをnative public-event boundaryとFrontendの両方で拒否する。
 4. capacity 1、16件FIFO、全`main_message`の順序と一度だけの処理、`item_handle`再配送のdedupe、new generationでのhandle再利用、overflow audit、priority、cooldown迂回、45/120秒milestone、generation/decision/stop cancel、正常terminalでのmessage保持を決定論的clockで検証する。
 5. tool event、reasoning、streaming delta、routine progressではLunaを起動しない。完了済み`agentMessage`だけが`main_message`となり、verified commitだけが`commit_ready`になる。
-6. active commit explanationがLuna caption/TTSより優先され、caption visible ack前、reduced motion、mute、stale workspaceではspeech/motionを開始しない。
+6. active commit explanationがLuna caption/TTSより優先され、caption visible ack前、reduced motion、mute、stale workspaceではspeech/motionを開始しない。`decision_wait -> matching pending_request_resolved -> main_message`で旧caption/cue/TTSがdismissされ、同generationの新caption/cue/TTSへ更新できる。
 7. Lunaのrelease verification、sandbox probe、isolation probe、runtime初期化の各構築段階でapp closeとforce cleanupを再現し、process tree、private run directory、scheduler active ownershipが期限内に0件へ収束する。
 8. support release proofがrole別model、tool 0、permission、skill/schema hashを照合し、失敗時もmain turnが完走する。

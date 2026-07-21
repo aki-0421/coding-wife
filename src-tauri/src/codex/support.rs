@@ -1834,16 +1834,18 @@ pub(crate) fn presence_public_text_is_safe(value: &str) -> bool {
     static CODE_OR_DIFF: OnceLock<Regex> = OnceLock::new();
     static BARE_FILENAME: OnceLock<Regex> = OnceLock::new();
     static OPAQUE_TOKEN: OnceLock<Regex> = OnceLock::new();
+    static REDACTION_MARKER: OnceLock<Regex> = OnceLock::new();
     let code_or_diff = CODE_OR_DIFF.get_or_init(|| {
         Regex::new(
             r#"(?ix)
             (?:^|\s)(?:diff\s+--git|index\s+[a-f0-9]+\.\.[a-f0-9]+|@@(?:\s|$)|---\s|\+\+\+\s)
             |```|~~~
-            |\b(?:fn|function|class|struct|enum|impl)\s+[a-z_$][a-z0-9_$]*\s*(?:\([^)]*\))?\s*\{
-            |\b(?:const|let|var)\s+[a-z_$][a-z0-9_$]*\s*=
+            |\b(?:fn|function|class|struct|enum|impl|interface)\s+[a-z_$][a-z0-9_$]*\s*(?:\([^)]*\))?\s*(?:\{|<)
+            |\b(?:const|let|var)\s+(?:mut\s+)?[a-z_$][a-z0-9_$]*\s*=
             |\b[a-z_$][a-z0-9_$]*\s*\([^)]*\)\s*=>
             |\bconsole\.log\s*\(
             |<\/?[a-z][^>]*>
+            |\{[^{}]*:[^{}]*\}
             |(?:^|\s)[+-](?:return\b|\s*(?:fn|function|const|let|var|class)\b|\s*[{}])
             "#,
         )
@@ -1851,7 +1853,7 @@ pub(crate) fn presence_public_text_is_safe(value: &str) -> bool {
     });
     let bare_filename = BARE_FILENAME.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:^|[^a-z0-9_.@+-])(?:dockerfile|makefile|[a-z0-9_.@+-]+\.(?:rs|ts|tsx|js|jsx|json|toml|ya?ml|md|py|go|java|kt|swift|c|cc|cpp|h|hpp|css|scss|html|sh|zsh|fish|sql|pem|key|env|log))(?:$|[^a-z0-9_])",
+            r"(?i)(?:^|[^a-z0-9_.@+-])(?:dockerfile|makefile|\.[a-z][a-z0-9_-]*|[a-z0-9][a-z0-9_.@+-]*\.(?:bash|c|cc|conf|config|cpp|css|csv|env|fish|go|graphql|h|hpp|html?|ini|java|js|json|jsonl|jsx|key|kt|kts|less|lock|log|markdown|md|pem|php|proto|py|rb|rs|sass|scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|ya?ml|zsh))(?:$|[^a-z0-9_])",
         )
         .expect("presence bare filename regex")
     });
@@ -1859,12 +1861,16 @@ pub(crate) fn presence_public_text_is_safe(value: &str) -> bool {
         Regex::new(r"(?i)\b(?:[a-f0-9]{32,}|[a-z0-9_+=-]{40,})\b")
             .expect("presence opaque token regex")
     });
+    let redaction_marker = REDACTION_MARKER
+        .get_or_init(|| Regex::new(r"(?i)\[redacted\]").expect("presence redaction marker regex"));
     let canonical = value.split_whitespace().collect::<Vec<_>>().join(" ");
     canonical == value
         && !value.is_empty()
         && !value.chars().any(char::is_control)
+        && !value.contains(['/', '\\'])
         && !value_contains_private_string(&Value::String(value.to_owned()))
         && !value.contains("<external>")
+        && !redaction_marker.is_match(value)
         && !code_or_diff.is_match(value)
         && !bare_filename.is_match(value)
         && !opaque_token.is_match(value)
@@ -2249,6 +2255,11 @@ mod tests {
             "console.log('secret')",
             "<div>secret</div>",
             "README.md を確認しました。",
+            "secrets.txt を確認しました。",
+            ".config を確認しました。",
+            "foo/bar を確認しました。",
+            "foo\\bar を確認しました。",
+            "処理済み [ReDaCtEd] です。",
             "secret-config.yaml を確認しました。",
             "private.pem secret.key Dockerfile Makefile",
             "https://example.com を確認しました。",
@@ -2332,6 +2343,12 @@ mod tests {
                 "schemaVersion": 1,
                 "locale": "ja",
                 "utterance": "README.md private.pem secret.key Dockerfile Makefile",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "foo/bar foo\\bar secrets.txt .config [ReDaCtEd]",
                 "cue": "asking"
             }),
             json!({

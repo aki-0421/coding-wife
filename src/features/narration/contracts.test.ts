@@ -1,21 +1,19 @@
 import { describe, expect, it } from "vitest"
-
-import redactionFixture from "@/test/fixtures/narration-redaction.v1.json"
-
 import {
-  NarrationContractError,
+  type CommitNarrationSourceKey,
   commitNarrationSourceKey,
+  NarrationContractError,
   narrationMaxTextScalars,
   narrationSchemaVersion,
   narrationSettingsSchemaVersion,
   parseCommitNarrationConsumerEvent,
-  parsePresenceDirectionEvent,
   parseNarrationSettingsSnapshot,
   parseNarrationSpeakResponse,
   parseNarrationVoiceList,
+  parsePresenceDirectionEvent,
   sourceKeyFromCommitNarrationEvent,
-  type CommitNarrationSourceKey,
 } from "@/features/narration/contracts"
+import redactionFixture from "@/test/fixtures/narration-redaction.v1.json"
 
 const sha = "a".repeat(40)
 
@@ -57,13 +55,15 @@ function started(trigger = "auto_verified_commit") {
 }
 
 function presenceDirection(overrides: Readonly<Record<string, unknown>> = {}) {
+  const trigger = overrides.trigger ?? "decision_wait"
   return {
     schemaVersion: narrationSchemaVersion,
     requestId: "presence-request-1",
     workspaceId: "workspace-1",
     workspaceGeneration: 7,
     sourceEventId: "event-42",
-    trigger: "decision_wait",
+    decisionId: trigger === "decision_wait" ? "pending-1" : null,
+    trigger,
     locale: "ja",
     utterance: "確認が必要なところで待っています。",
     cue: "asking",
@@ -168,6 +168,11 @@ describe("narration contracts", () => {
       'console.log("ready");',
       "<main>Ready</main>",
       "README.md を確認しました。",
+      "secrets.txt を確認しました。",
+      ".config を確認しました。",
+      "foo/bar を確認しました。",
+      "foo\\bar を確認しました。",
+      "処理済み [ReDaCtEd] です。",
       "secret-config.yaml is ready.",
       "private.pem secret.key Dockerfile Makefile",
       "diff --git old new @@ -1 +1 @@ -return false; +return true;",
@@ -188,6 +193,8 @@ describe("narration contracts", () => {
       presenceDirection({ schemaVersion: 2 }),
       presenceDirection({ workspaceGeneration: 0 }),
       presenceDirection({ trigger: "routine_tool" }),
+      presenceDirection({ decisionId: null }),
+      presenceDirection({ trigger: "main_message", decisionId: "pending-1" }),
       presenceDirection({ trigger: "decision_wait", cue: "success" }),
       presenceDirection({
         trigger: "main_message",

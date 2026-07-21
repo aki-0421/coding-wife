@@ -26,6 +26,7 @@ use super::support::{
     SupportPresenceRequest, SupportPresenceResult, SupportRuntime, SupportRuntimeError,
 };
 use super::types::{CodexEvent, CodexEventPayload, CODEX_PRESENCE_DIRECTOR_MODEL};
+use super::workspace::WorkspaceService;
 
 pub const PRESENCE_DIRECTION_EVENT_CHANNEL: &str = "coding-wife://presence-direction";
 pub const PRESENCE_SCHEMA_VERSION: u16 = 1;
@@ -59,6 +60,7 @@ pub struct PresenceDirectionEventV1 {
     pub workspace_id: String,
     pub workspace_generation: u64,
     pub source_event_id: String,
+    pub decision_id: Option<String>,
     pub trigger: PresenceTrigger,
     pub locale: PresenceLocale,
     pub utterance: String,
@@ -153,6 +155,36 @@ struct PresenceScope {
     workspace_id: String,
     workspace_generation: u64,
     locale: PresenceLocale,
+    identity_deny_terms: PresenceIdentityDenyTerms,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct PresenceIdentityDenyTerms {
+    normalized: Vec<String>,
+}
+
+impl PresenceIdentityDenyTerms {
+    fn new(terms: impl IntoIterator<Item = String>) -> Self {
+        let mut normalized = terms
+            .into_iter()
+            .map(|term| normalize_identity_term(&term))
+            .filter(|term| !term.is_empty())
+            .collect::<Vec<_>>();
+        normalized.sort_unstable();
+        normalized.dedup();
+        Self { normalized }
+    }
+
+    fn contains(&self, value: &str) -> bool {
+        if self.normalized.is_empty() {
+            return false;
+        }
+        let normalized_value = normalize_identity_term(value);
+        let padded_value = format!(" {normalized_value} ");
+        self.normalized
+            .iter()
+            .any(|term| padded_value.contains(&format!(" {term} ")))
+    }
 }
 
 #[derive(Clone)]
@@ -180,6 +212,12 @@ impl PresenceCandidate {
         self.request.workspace_id == scope.workspace_id
             && self.request.workspace_generation == scope.workspace_generation
             && self.request.input.locale == scope.locale
+            && self
+                .request
+                .input
+                .message_excerpt
+                .as_deref()
+                .is_none_or(|excerpt| !scope.identity_deny_terms.contains(excerpt))
     }
 }
 
@@ -273,7 +311,16 @@ impl PresenceDirector {
         }
     }
 
-    pub fn set_scope(&self, request: PresenceScopeRequestV1) -> Result<(), PresenceCommandError> {
+    #[cfg(test)]
+    fn set_scope(&self, request: PresenceScopeRequestV1) -> Result<(), PresenceCommandError> {
+        self.set_scope_with_identity_terms(request, Vec::new())
+    }
+
+    fn set_scope_with_identity_terms(
+        &self,
+        request: PresenceScopeRequestV1,
+        identity_terms: Vec<String>,
+    ) -> Result<(), PresenceCommandError> {
         const OPERATION: &str = "presence.set_scope";
         if request.schema_version != PRESENCE_SCHEMA_VERSION
             || !valid_opaque(&request.workspace_id)
@@ -285,6 +332,7 @@ impl PresenceDirector {
             workspace_id: request.workspace_id,
             workspace_generation: request.workspace_generation,
             locale: request.locale,
+            identity_deny_terms: PresenceIdentityDenyTerms::new(identity_terms),
         };
         let active_to_cancel = {
             let mut data = self.inner.data.lock().expect("presence data lock poisoned");
@@ -660,7 +708,15 @@ impl PresenceDirector {
         if !self.reserve_main_message_handle(event, item_handle) {
             return;
         }
-        let Some(message_excerpt) = sanitize_main_message_excerpt(text) else {
+        let identity_deny_terms = {
+            let data = self.inner.data.lock().expect("presence data lock poisoned");
+            let Some(scope) = data.scope.as_ref() else {
+                return;
+            };
+            scope.identity_deny_terms.clone()
+        };
+        let Some(message_excerpt) = sanitize_main_message_excerpt(text, &identity_deny_terms)
+        else {
             return;
         };
         let candidate = self.candidate(
@@ -754,6 +810,14 @@ impl PresenceDirector {
             },
         };
         if validate_presence_input(&request.input).is_err() {
+            return None;
+        }
+        if request
+            .input
+            .message_excerpt
+            .as_deref()
+            .is_some_and(|excerpt| scope.identity_deny_terms.contains(excerpt))
+        {
             return None;
         }
         Some(PresenceCandidate {
@@ -1243,11 +1307,16 @@ impl PresenceExecutor for IsolatedPresenceExecutor {
 }
 
 #[tauri::command]
-pub fn presence_set_scope(
+pub async fn presence_set_scope(
     request: PresenceScopeRequestV1,
     director: State<'_, Arc<PresenceDirector>>,
+    workspace: State<'_, WorkspaceService>,
 ) -> Result<(), PresenceCommandError> {
-    director.set_scope(request)
+    let identity_terms = workspace
+        .presence_identity_terms(&request.workspace_id)
+        .await
+        .ok_or_else(|| PresenceCommandError::invalid("presence.set_scope"))?;
+    director.set_scope_with_identity_terms(request, identity_terms)
 }
 
 fn cancel_active_locked(data: &mut PresenceData) -> Option<String> {
@@ -1262,11 +1331,17 @@ fn clear_seen_main_messages(data: &mut PresenceData) {
     data.seen_main_message_order.clear();
 }
 
-fn sanitize_main_message_excerpt(value: &str) -> Option<String> {
+fn sanitize_main_message_excerpt(
+    value: &str,
+    identity_deny_terms: &PresenceIdentityDenyTerms,
+) -> Option<String> {
     static INLINE_CODE: OnceLock<Regex> = OnceLock::new();
     let inline_code = INLINE_CODE.get_or_init(|| {
         Regex::new(r"`{1,3}[^`\r\n]{1,4096}`{1,3}").expect("presence inline code regex")
     });
+    if identity_deny_terms.contains(value) {
+        return None;
+    }
     let redacted = redact_text(value, None, MAIN_MESSAGE_SANITIZER_BYTES);
     let mut in_fence = false;
     let mut in_diff = false;
@@ -1311,7 +1386,25 @@ fn sanitize_main_message_excerpt(value: &str) -> Option<String> {
     } else {
         joined
     };
-    presence_public_text_is_safe(&excerpt).then_some(excerpt)
+    (presence_public_text_is_safe(&excerpt) && !identity_deny_terms.contains(&excerpt))
+        .then_some(excerpt)
+}
+
+fn normalize_identity_term(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut separator = true;
+    for character in value.chars() {
+        if character.is_alphanumeric() {
+            for lowercase in character.to_lowercase() {
+                normalized.push(lowercase);
+            }
+            separator = false;
+        } else if !separator {
+            normalized.push(' ');
+            separator = true;
+        }
+    }
+    normalized.trim().to_owned()
 }
 
 fn trigger_policy(trigger: PresenceTrigger) -> (PresenceSemanticState, PresencePriority, u8) {
@@ -1368,6 +1461,7 @@ fn public_event(
         workspace_id: candidate.request.workspace_id.clone(),
         workspace_generation: candidate.request.workspace_generation,
         source_event_id: candidate.source_event_id.clone(),
+        decision_id: candidate.decision_id.clone(),
         trigger: candidate.request.input.trigger,
         locale: direction.locale,
         utterance: direction.utterance,
@@ -1946,25 +2040,105 @@ mod tests {
 
     #[test]
     fn main_message_sanitizer_removes_private_code_and_complete_diff_blocks() {
-        let excerpt = sanitize_main_message_excerpt(concat!(
-            "要点を整理しました。 README.md Bearer private-token\n",
-            "```rust\nfn main() {}\n```\n",
-            "続けて確認します。\n",
-            "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;"
-        ))
+        let deny_terms = PresenceIdentityDenyTerms::default();
+        let excerpt = sanitize_main_message_excerpt(
+            concat!(
+                "要点を整理しました。 README.md Bearer private-token\n",
+                "```rust\nfn main() {}\n```\n",
+                "続けて確認します。\n",
+                "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;"
+            ),
+            &deny_terms,
+        )
         .expect("safe prose remains");
 
         assert_eq!(excerpt, "要点を整理しました。 続けて確認します。");
         assert!(presence_public_text_is_safe(&excerpt));
         assert_eq!(
             sanitize_main_message_excerpt(
-                "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;"
+                "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;",
+                &deny_terms,
             ),
             None
         );
-        let bounded = sanitize_main_message_excerpt(&"あ".repeat(300)).expect("bounded excerpt");
+        let bounded =
+            sanitize_main_message_excerpt(&"あ".repeat(300), &deny_terms).expect("bounded excerpt");
         assert_eq!(bounded.chars().count(), MAIN_MESSAGE_EXCERPT_SCALARS);
         assert!(bounded.ends_with('…'));
+
+        for private in [
+            "foo/bar",
+            "foo\\bar",
+            "secrets.txt",
+            ".config",
+            "token=secret-value",
+            "[ReDaCtEd]",
+        ] {
+            assert_eq!(
+                sanitize_main_message_excerpt(private, &deny_terms),
+                None,
+                "accepted {private:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_and_repository_identity_terms_are_rejected_twice_before_luna() {
+        let raw_terms = [
+            "Private Acquisition".to_owned(),
+            "private-acquisition-project".to_owned(),
+            "secret-owner/private-repo".to_owned(),
+            "secret-owner".to_owned(),
+            "private-repo".to_owned(),
+        ];
+        let deny_terms = PresenceIdentityDenyTerms::new(raw_terms.clone());
+        for private in [
+            "Private_Acquisition の作業を終えました。",
+            "PRIVATE-ACQUISITION-PROJECT is ready.",
+            "secret owner private repo を確認しました。",
+            "secret-owner の作業です。",
+            "private_repo is ready.",
+        ] {
+            assert_eq!(
+                sanitize_main_message_excerpt(private, &deny_terms),
+                None,
+                "producer accepted {private:?}"
+            );
+            assert!(
+                deny_terms.contains(private),
+                "boundary accepted {private:?}"
+            );
+        }
+
+        assert_eq!(
+            sanitize_main_message_excerpt("次の確認へ進みます。", &deny_terms),
+            Some("次の確認へ進みます。".to_owned())
+        );
+
+        let director = director(
+            Arc::new(FakeExecutor::default()),
+            Arc::new(CapturingEvents::default()),
+            fast_timing(),
+        );
+        director
+            .set_scope_with_identity_terms(scope(PresenceLocale::Ja), raw_terms.into())
+            .expect("private scope");
+        assert!(
+            director
+                .candidate(
+                    "workspace-fixture".to_owned(),
+                    7,
+                    "identity-boundary-event".to_owned(),
+                    PresenceTrigger::MainMessage,
+                    None,
+                    Some("turn-fixture".to_owned()),
+                    PresenceElapsedBucket::None,
+                    false,
+                    Some("Private Acquisition の作業を終えました。".to_owned()),
+                )
+                .is_none(),
+            "independent model boundary accepted a workspace identity"
+        );
     }
 
     #[tokio::test]

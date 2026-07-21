@@ -9,14 +9,14 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import {
+  type CommitNarrationStartedV1,
+  DemoNarrationGateway,
   NarrationController,
   NarrationProvider,
-  DemoNarrationGateway,
   narrationSchemaVersion,
   narrationSettingsSchemaVersion,
-  sourceKeyFromCommitNarrationEvent,
-  type CommitNarrationStartedV1,
   type PresenceDirectionEventV1,
+  sourceKeyFromCommitNarrationEvent,
 } from "@/features/narration"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
@@ -73,6 +73,7 @@ const presence: PresenceDirectionEventV1 = {
   workspaceId: "workspace-1",
   workspaceGeneration: 2,
   sourceEventId: "event-1",
+  decisionId: "pending-1",
   trigger: "decision_wait",
   locale: "ja",
   utterance: "確認が必要なところで待っています。",

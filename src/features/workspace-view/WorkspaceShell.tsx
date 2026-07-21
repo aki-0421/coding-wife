@@ -68,11 +68,11 @@ import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceVie
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
-import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import {
   deriveWorkspaceCharacterState,
   useCompletedCharacterCue,
 } from "@/features/workspace-view/workspace-character-state"
+import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
 export interface WorkspaceShellProps {
@@ -443,6 +443,17 @@ export function WorkspaceShell({
     selectedWorkspaceId,
     workspaceGeneration,
   ])
+
+  useEffect(() => {
+    for (const event of view.codex.timeline) {
+      if (event.kind !== "request_resolved") continue
+      narrationController.consumePendingRequestResolved({
+        workspaceId: event.workspaceId,
+        workspaceGeneration: event.generation,
+        pendingId: event.pendingId,
+      })
+    }
+  }, [narrationController, view.codex.timeline])
 
   const stopTurn = useCallback(async () => {
     commitExplanationController?.revokePresentationIntent("turn_stop")

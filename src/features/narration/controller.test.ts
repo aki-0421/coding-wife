@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
-  narrationSchemaVersion,
-  narrationSettingsSchemaVersion,
-  sourceKeyFromCommitNarrationEvent,
   type CommitNarrationConsumerEventV1,
   type CommitNarrationSourceKey,
   type NarrationCancelReason,
@@ -15,8 +12,11 @@ import {
   type NarrationSpeakRequestV1,
   type NarrationSpeakResponseV1,
   type NarrationVoiceListV1,
-  type PresenceDirectionEventV1,
+  narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
   type PresenceDirectionConsumerPort,
+  type PresenceDirectionEventV1,
+  sourceKeyFromCommitNarrationEvent,
 } from "@/features/narration/contracts"
 import { NarrationController } from "@/features/narration/controller"
 import type { NarrationGateway } from "@/features/narration/transport"
@@ -87,13 +87,15 @@ function initialSnapshot(enabled = false): NarrationSettingsSnapshotV1 {
 function presenceEvent(
   overrides: Partial<PresenceDirectionEventV1> = {},
 ): PresenceDirectionEventV1 {
+  const trigger = overrides.trigger ?? "decision_wait"
   return {
     schemaVersion: narrationSchemaVersion,
     requestId: "presence-1",
     workspaceId: "workspace-1",
     workspaceGeneration: 3,
     sourceEventId: "source-event-1",
-    trigger: "decision_wait",
+    decisionId: trigger === "decision_wait" ? "pending-1" : null,
+    trigger,
     locale: "ja",
     utterance: "確認が必要なところで待っています。",
     cue: "asking",
@@ -111,7 +113,9 @@ class FakeNarrationGateway implements NarrationGateway {
   public readonly speech: NarrationSpeakRequestV1[] = []
   public readonly cancelReasons: NarrationCancelReason[] = []
   public onSpeak: ((request: NarrationSpeakRequestV1) => void) | null = null
-  public onCancel: ((reason: NarrationCancelReason) => void) | null = null
+  public onCancel:
+    | ((reason: NarrationCancelReason) => void | Promise<void>)
+    | null = null
   #snapshot: NarrationSettingsSnapshotV1
 
   public constructor(enabled = false) {
@@ -213,8 +217,7 @@ class FakeNarrationGateway implements NarrationGateway {
 
   public cancel(reason: NarrationCancelReason): Promise<void> {
     this.cancelReasons.push(reason)
-    this.onCancel?.(reason)
-    return Promise.resolve()
+    return Promise.resolve(this.onCancel?.(reason))
   }
 }
 
@@ -552,6 +555,101 @@ describe("NarrationController", () => {
     ).toBe(true)
     expect(controller.getSnapshot().presence?.requestId).toBe(
       "recoverable-failure",
+    )
+  })
+
+  it("dismisses a resolved decision before accepting and speaking the next main message", async () => {
+    const { controller, gateway } = await ready(true)
+    let releaseCancel: (() => void) | undefined
+    gateway.onCancel = () =>
+      new Promise<void>((resolve) => {
+        releaseCancel = resolve
+      })
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    const decision = presenceEvent()
+    expect(controller.consumePresence(decision)).toBe(true)
+    expect(controller.getSnapshot().presence?.speechStatus).toBe("queued")
+
+    expect(
+      controller.consumePendingRequestResolved({
+        workspaceId: "workspace-1",
+        workspaceGeneration: 3,
+        pendingId: "pending-1",
+      }),
+    ).toBe(true)
+    expect(controller.getSnapshot().presence).toBeNull()
+    await vi.waitFor(() => expect(gateway.cancelReasons).toHaveLength(1))
+
+    const mainMessage = presenceEvent({
+      requestId: "main-message-after-decision",
+      sourceEventId: "main-message-after-decision-source",
+      trigger: "main_message",
+      cue: "working",
+      priority: "normal",
+      utterance: "次の作業へ進みます。",
+    })
+    expect(controller.consumePresence(mainMessage)).toBe(true)
+    const mainPresence = controller.getSnapshot().presence
+    expect(mainPresence).toMatchObject({
+      requestId: mainMessage.requestId,
+      decisionId: null,
+      trigger: "main_message",
+      cue: "working",
+    })
+    expect(
+      controller.acknowledgePresenceCaptionVisible({
+        requestId: mainMessage.requestId,
+        presentationGeneration: mainPresence?.presentationGeneration ?? 0,
+      }),
+    ).toBe(true)
+    await Promise.resolve()
+    expect(gateway.speech).toHaveLength(0)
+
+    releaseCancel?.()
+    await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
+    expect(gateway.speech[0]).toMatchObject({
+      semanticType: "progress",
+      text: mainMessage.utterance,
+    })
+  })
+
+  it("lets a terminalized failure caption yield to the next valid event", async () => {
+    const { controller } = await ready(false)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "failure",
+          sourceEventId: "failure-source",
+          trigger: "recoverable_failure",
+          cue: "warning",
+          priority: "high",
+        }),
+      ),
+    ).toBe(true)
+    expect(controller.getSnapshot().presence?.speechStatus).toBe("off")
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "main-after-failure",
+          sourceEventId: "main-after-failure-source",
+          trigger: "main_message",
+          cue: "working",
+          priority: "normal",
+        }),
+      ),
+    ).toBe(true)
+    expect(controller.getSnapshot().presence?.requestId).toBe(
+      "main-after-failure",
     )
   })
 

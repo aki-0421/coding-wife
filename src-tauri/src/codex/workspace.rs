@@ -218,6 +218,7 @@ struct TrustedWorkspace {
     root: PathBuf,
     root_device: u64,
     root_inode: u64,
+    github_repository: Option<String>,
     write_provenance: WorkspaceWriteProvenance,
     registration: WorkspaceRegistration,
 }
@@ -341,6 +342,27 @@ impl WorkspaceService {
             })
     }
 
+    /// Returns private identity terms used only by the native Luna boundary.
+    /// These values must never be serialized into a WebView or support-model request.
+    pub(crate) async fn presence_identity_terms(&self, workspace_id: &str) -> Option<Vec<String>> {
+        self.trusted.lock().await.get(workspace_id).map(|record| {
+            let mut terms = vec![record.registration.alias.clone()];
+            if let Some(root_basename) = record.root.file_name().and_then(|value| value.to_str()) {
+                terms.push(root_basename.to_owned());
+            }
+            if let Some(repository) = record.github_repository.as_deref() {
+                terms.push(repository.to_owned());
+                if let Some((owner, name)) = repository.split_once('/') {
+                    terms.push(owner.to_owned());
+                    terms.push(name.to_owned());
+                }
+            }
+            terms.sort_unstable();
+            terms.dedup();
+            terms
+        })
+    }
+
     pub async fn deactivate_workspace(&self, workspace_id: &str) -> Result<(), CodexCommandError> {
         self.supervisor
             .unregister_workspace_root(workspace_id)
@@ -384,6 +406,7 @@ impl WorkspaceService {
                 root: candidate.git.canonical_root,
                 root_device: candidate.git.root_device,
                 root_inode: candidate.git.root_inode,
+                github_repository: candidate.git.github_repository,
                 write_provenance: candidate.write_provenance,
                 registration: registration.clone(),
             },
@@ -1190,6 +1213,72 @@ mod tests {
             identity.github_repository,
             Some("aki-0421/coding-wife".to_owned())
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn presence_identity_terms_stay_native_and_cover_alias_root_and_repository() {
+        let root = git_repository();
+        let root_basename = root
+            .file_name()
+            .expect("root basename")
+            .to_string_lossy()
+            .into_owned();
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:secret-owner/private-repo.git",
+            ])
+            .status()
+            .expect("add origin");
+        assert!(status.success());
+        let service =
+            WorkspaceService::new(CodexSupervisor::new(), Arc::new(FixedPicker(root.clone())));
+        let candidate = service
+            .validate_workspace_root(
+                root.clone(),
+                "workspace-private".to_owned(),
+                "Private Acquisition".to_owned(),
+            )
+            .await
+            .expect("validated workspace");
+        service
+            .activate_candidate(candidate)
+            .await
+            .expect("activated workspace");
+
+        let terms = service
+            .presence_identity_terms("workspace-private")
+            .await
+            .expect("native identity terms");
+        for expected in [
+            "Private Acquisition",
+            root_basename.as_str(),
+            "secret-owner/private-repo",
+            "secret-owner",
+            "private-repo",
+        ] {
+            assert!(
+                terms.iter().any(|term| term == expected),
+                "missing {expected}"
+            );
+        }
+        let encoded = serde_json::to_string(
+            &service
+                .trusted
+                .lock()
+                .await
+                .get("workspace-private")
+                .expect("trusted workspace")
+                .registration,
+        )
+        .expect("public registration");
+        assert!(!encoded.contains("secret-owner"));
+        assert!(!encoded.contains("private-repo"));
         let _ = fs::remove_dir_all(root);
     }
 

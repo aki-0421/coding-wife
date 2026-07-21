@@ -17,6 +17,7 @@ function presentation(
     workspaceId: "workspace-1",
     workspaceGeneration: 2,
     sourceEventId: "event-1",
+    decisionId: "pending-1",
     trigger: "decision_wait",
     locale: "ja",
     utterance: "確認が必要なところで待っています。",

@@ -1,28 +1,28 @@
 import {
-  NarrationContractError,
-  commitNarrationSourceKey,
-  narrationSchemaVersion,
-  narrationSettingsSchemaVersion,
-  parseCommitNarrationConsumerEvent,
-  parsePresenceDirectionEvent,
-  parseNarrationSettings,
-  sourceKeyFromCommitNarrationEvent,
   type CommitNarrationConsumerEventV1,
   type CommitNarrationConsumerPort,
   type CommitNarrationSourceKey,
+  commitNarrationSourceKey,
   type NarrationCancelReason,
   type NarrationCommitJobTrigger,
+  NarrationContractError,
   type NarrationLocale,
   type NarrationRuntimeSnapshotV1,
   type NarrationSettingsSnapshotV1,
   type NarrationSettingsUpdateV2,
   type NarrationVoiceV1,
+  narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
   type PresenceDirectionConsumerPort,
   type PresenceDirectionCue,
   type PresenceDirectionEventV1,
   type PresenceDirectionPriority,
   type PresenceDirectionScopeRequestV1,
   type PresenceDirectionTrigger,
+  parseCommitNarrationConsumerEvent,
+  parseNarrationSettings,
+  parsePresenceDirectionEvent,
+  sourceKeyFromCommitNarrationEvent,
 } from "@/features/narration/contracts"
 import {
   NarrationBoundaryError,
@@ -97,6 +97,7 @@ export interface PresenceDirectionPresentationSnapshot {
   readonly workspaceId: string
   readonly workspaceGeneration: number
   readonly sourceEventId: string
+  readonly decisionId: string | null
   readonly trigger: PresenceDirectionTrigger
   readonly locale: NarrationLocale
   readonly utterance: string
@@ -244,6 +245,16 @@ function presencePriority(trigger: PresenceDirectionTrigger): number {
     case "long_milestone":
       return 1
   }
+}
+
+function presenceHoldsPriority(
+  presence: PresenceDirectionPresentationSnapshot,
+): boolean {
+  return (
+    presence.trigger === "decision_wait" ||
+    presence.speechStatus === "queued" ||
+    presence.speechStatus === "playing"
+  )
 }
 
 function presenceSemanticType(
@@ -636,6 +647,7 @@ export class NarrationController {
     const active = this.#snapshot.presence
     if (
       active !== null &&
+      presenceHoldsPriority(active) &&
       presencePriority(event.trigger) < presencePriority(active.trigger)
     ) {
       return false
@@ -649,10 +661,7 @@ export class NarrationController {
       active !== null &&
       (active.speechStatus === "queued" || active.speechStatus === "playing")
     ) {
-      this.#presenceCancellation =
-        this.cancelPresenceNativeSpeech("explicit_cancel")
-    } else {
-      this.#presenceCancellation = Promise.resolve()
+      this.queuePresenceCancellation("explicit_cancel")
     }
 
     const presentationGeneration = ++this.#presentationGeneration
@@ -664,6 +673,7 @@ export class NarrationController {
         workspaceId: event.workspaceId,
         workspaceGeneration: event.workspaceGeneration,
         sourceEventId: event.sourceEventId,
+        decisionId: event.decisionId,
         trigger: event.trigger,
         locale: event.locale,
         utterance: event.utterance,
@@ -806,6 +816,25 @@ export class NarrationController {
     return true
   }
 
+  public consumePendingRequestResolved(resolution: {
+    readonly workspaceId: string
+    readonly workspaceGeneration: number
+    readonly pendingId: string
+  }): boolean {
+    const presence = this.#snapshot.presence
+    if (
+      presence === null ||
+      presence.trigger !== "decision_wait" ||
+      presence.workspaceId !== resolution.workspaceId ||
+      presence.workspaceGeneration !== resolution.workspaceGeneration ||
+      presence.decisionId !== resolution.pendingId
+    ) {
+      return false
+    }
+    void this.dismissPresence("explicit_cancel")
+    return true
+  }
+
   public async dismissPresence(
     reason: NarrationCancelReason = "explicit_cancel",
   ): Promise<void> {
@@ -823,9 +852,7 @@ export class NarrationController {
       latestPresenceRequestId: null,
     }
     this.emit()
-    this.#presenceCancellation = shouldCancelNative
-      ? this.cancelPresenceNativeSpeech(reason)
-      : Promise.resolve()
+    if (shouldCancelNative) this.queuePresenceCancellation(reason)
     await this.#presenceCancellation
   }
 
@@ -1298,6 +1325,12 @@ export class NarrationController {
     } catch {
       // Optional presence failures stay isolated from the main session UI.
     }
+  }
+
+  private queuePresenceCancellation(reason: NarrationCancelReason): void {
+    this.#presenceCancellation = this.#presenceCancellation.then(() =>
+      this.cancelPresenceNativeSpeech(reason),
+    )
   }
 
   private prepareCaptionSpeech(): void {
