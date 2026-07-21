@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock, Weak};
@@ -79,6 +80,20 @@ const MAX_MODEL_PAGES: usize = 20;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
 const MAX_RESTART_EXPONENT: usize = 6;
 const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
+
+async fn join_force_shutdown_components<Invalidate, Runtime, Presence>(
+    invalidate: Invalidate,
+    runtime: Runtime,
+    presence: Presence,
+) -> bool
+where
+    Invalidate: Future<Output = ()>,
+    Runtime: Future<Output = bool>,
+    Presence: Future<Output = bool>,
+{
+    let (_, runtime_converged, presence_converged) = tokio::join!(invalidate, runtime, presence);
+    runtime_converged && presence_converged
+}
 
 #[derive(Clone, Debug)]
 enum PendingTurnStartPurpose {
@@ -2202,21 +2217,32 @@ impl CodexSupervisor {
             state.diagnostic.health = CodexHealth::Disconnected;
             (state.runtime.take(), state.generation)
         };
-        if let Some(main_work_unit) = self.main_work_unit_runtime() {
-            main_work_unit.invalidate_generation(generation).await;
-        }
-        let runtime_converged = if let Some(runtime) = runtime {
-            runtime
-                .force_shutdown_and_wait(Duration::from_millis(400))
-                .await
-        } else {
-            true
-        };
-        let presence_converged = match self.presence_observer() {
-            Some(observer) => observer.force_shutdown_now().await,
-            None => true,
-        };
-        runtime_converged && presence_converged
+        let main_work_unit = self.main_work_unit_runtime();
+        let presence = self.presence_observer();
+        join_force_shutdown_components(
+            async move {
+                if let Some(main_work_unit) = main_work_unit {
+                    main_work_unit.invalidate_generation(generation).await;
+                }
+            },
+            async move {
+                match runtime {
+                    Some(runtime) => {
+                        runtime
+                            .force_shutdown_and_wait(Duration::from_millis(400))
+                            .await
+                    }
+                    None => true,
+                }
+            },
+            async move {
+                match presence {
+                    Some(observer) => observer.force_shutdown_now().await,
+                    None => true,
+                }
+            },
+        )
+        .await
     }
 
     async fn run_signal_loop(&self, mut receiver: mpsc::Receiver<RuntimeSignal>) {
@@ -3881,5 +3907,44 @@ mod tests {
 
         assert!(!directory.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn production_force_components_share_the_single_app_deadline() {
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let invalidation_barrier = barrier.clone();
+        let runtime_barrier = barrier.clone();
+        let presence_barrier = barrier;
+        let converged = tokio::time::timeout(
+            Duration::from_millis(500),
+            join_force_shutdown_components(
+                async move {
+                    invalidation_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                },
+                async move {
+                    runtime_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    false
+                },
+                async move {
+                    presence_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(450)).await;
+                    true
+                },
+            ),
+        )
+        .await
+        .expect("parallel force composition must fit the app deadline");
+        assert!(!converged, "one component failure must remain visible");
+
+        assert!(
+            join_force_shutdown_components(async {}, async { true }, async { true }).await,
+            "all components must converge"
+        );
+        assert!(
+            !join_force_shutdown_components(async {}, async { true }, async { false }).await,
+            "presence failure must remain visible"
+        );
     }
 }
