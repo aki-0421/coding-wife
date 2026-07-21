@@ -3093,12 +3093,17 @@ describe("WorkspaceShell", () => {
       },
       timeline: sequences.map((sequence) => ({
         id: `event-${workspaceId}-${String(sequence)}`,
-        sequence,
-        producer: "code" as const,
-        kind: "history" as const,
-        domainKind: `code.fixture.${String(sequence)}`,
+        stableId: `assistant-${workspaceId}-${String(sequence)}`,
+        sourceEventId: `event-${workspaceId}-${String(sequence)}`,
+        workspaceId,
+        generation: 1,
+        sourceSequence: sequence,
         occurredAt: "2026-07-18T00:00:00.000Z",
+        kind: "assistant" as const,
         status: "completed",
+        durable: true,
+        itemHandle: `item-${workspaceId}-${String(sequence)}`,
+        text: `Response fixture ${String(sequence)}`,
       })),
       history: { mode: "ready", errorCode: null, backupName: null },
     })
@@ -3122,7 +3127,7 @@ describe("WorkspaceShell", () => {
 
     try {
       const { container } = renderWorkspace(adapter)
-      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      expect(await screen.findByText("Response fixture 4")).toBeVisible()
       const viewport = container.querySelector<HTMLElement>(
         '.chat-pane [data-slot="scroll-area-viewport"]',
       )
@@ -3140,13 +3145,13 @@ describe("WorkspaceShell", () => {
           name: /main, fixture, Backlog/u,
         }),
       )
-      expect(await screen.findByText("code.fixture.11")).toBeVisible()
+      expect(await screen.findByText("Response fixture 11")).toBeVisible()
       fireEvent.click(
         within(navigation).getByRole("button", {
           name: /main, fixture, In Progress/u,
         }),
       )
-      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      expect(await screen.findByText("Response fixture 4")).toBeVisible()
       const restoredViewport = container.querySelector<HTMLElement>(
         '.chat-pane [data-slot="scroll-area-viewport"]',
       )

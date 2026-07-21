@@ -5,7 +5,7 @@ export interface PublicTextOptions {
 
 const privateMaterialPatterns = [
   /(?:^|[\s"'])\/(?:users|volumes|library|applications)\//iu,
-  /(?:bearer\s+[a-z0-9._~+/=-]{6,}|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization|auth[_ -]?cookie|session[_ -]?id|sessionid|set-cookie)\s*[:=])/iu,
+  /(?:bearer\s+[a-z0-9._~+/=-]{6,}|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|id[_ -]?token|token|password|passwd|secret|client[_ -]?secret|authorization|auth[_ -]?cookie|cookie|session[_ -]?id|sessionid|set-cookie)\s*[:=])/iu,
   /\b(?:sk|sess|rk|pk)-[A-Za-z0-9_-]{12,}\b/u,
   /chain-of-thought/iu,
 ] as const
