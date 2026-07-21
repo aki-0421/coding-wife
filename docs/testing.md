@@ -1,7 +1,7 @@
 ---
 title: "Testing Coding Wife"
 description: "Judge-facing setup, CI, three-platform release verification, installation, and unsigned-distribution instructions for Coding Wife."
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "Reproducing the hackathon build or verifying Coding Wife on a supported desktop platform."
   - "Changing release commands, installer layouts, or repository quality gates."
@@ -9,9 +9,15 @@ read_when:
 
 # Testing Coding Wife
 
-## Supported release target
+## Packaging targets and QA scope
 
-The verified release targets are macOS 14 or later on Apple Silicon, Windows 11 x64, and Ubuntu 22.04 / Debian 12-compatible Linux x64. Intel Mac, Windows Arm, Linux Arm, store packages, and automatic updates are not claimed as supported. The free artifacts do not use paid distribution identities: macOS is ad-hoc signed and not notarized, while Windows and Linux packages are unsigned. Verify the matching SHA-256 sidecar and reviewed source before running a downloaded artifact.
+Packaging workflows target macOS 14 or later on Apple Silicon, Windows 11 x64, and Ubuntu 22.04 / Debian 12-compatible Linux x64. Intel Mac, Windows Arm, Linux Arm, store packages, and automatic updates are not claimed. These are package targets, not equivalent end-to-end validation claims.
+
+The primary manual and automated app workflow QA runs on macOS Apple Silicon against the real Tauri window, WKWebView, IPC, Rust backend, local Codex process, Live2D renderer, and native audio playback. Windows and Linux workflows verify their native package installation or extraction and removal; they do not currently duplicate that full product E2E. Captions remain the cross-platform fallback, while optional TTS playback is macOS-only.
+
+[Coding Wife v0.1.5](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.5) is public with macOS Arm64, Windows x64, and Linux x64 artifacts plus matching SHA-256 sidecars. It is an older preview: it predates 48 subsequent implementation commits containing Terra/Luna orchestration and the latest Chat and Commit interfaces. For the exact Build Week workflow, test the current repository source.
+
+The free artifacts do not use paid distribution identities: macOS is ad-hoc signed and not notarized, while Windows and Linux packages are unsigned. Verify the matching SHA-256 sidecar and reviewed source before running a downloaded artifact.
 
 ## Install dependencies
 
@@ -21,7 +27,7 @@ pnpm install --frozen-lockfile
 cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
 ```
 
-The explicit Cargo fetch installs the locked Apple Silicon registry metadata before the quality sequence switches its license generator to offline mode. No application API key is required. A compatible, authenticated local Codex installation is required for the production conversation path.
+The explicit Cargo fetch installs the locked Apple Silicon registry metadata before the quality sequence switches its license generator to offline mode. No application API key or env file is required for the core app. A compatible, authenticated local Codex installation is required for production conversations. Optional OpenAI TTS is configured in App Settings, stored by the native app, and currently played only on macOS.
 
 ## Continuous integration
 
@@ -29,7 +35,7 @@ GitHub Actions runs the repository CI for every Pull Request into `develop`, eve
 
 PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
 
-The separate `Release installers` workflow runs only for a `v<version>` tag. Every platform job requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. macOS runs the repository-owned DMG tests and seal verification; Windows silently installs and uninstalls the current-user NSIS setup; Linux installs and purges the Debian package and extracts the AppImage. Read-only jobs retain their verified artifacts for one day, and only the final aggregation job receives release write permission. It verifies the exact four artifacts and four SHA-256 sidecars before creating a draft and never makes the release public. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
+The separate `Release installers` workflow runs only for a `v<version>` tag. Every platform job requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. macOS runs the repository-owned DMG tests and seal verification; Windows silently installs and uninstalls the current-user NSIS setup; Linux installs and purges the Debian package and extracts the AppImage. Read-only jobs retain their verified artifacts for one day, and only the final aggregation job receives release write permission. It verifies the exact four artifacts and four SHA-256 sidecars before creating a draft. Publication is a separate manual action after release notes, downloaded checksums, and available install smokes are reviewed. Public v0.1.5 followed that boundary; future tags remain drafts until explicitly published. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
 
 ## Run the development build
 
@@ -137,16 +143,18 @@ This creates a minimal real arm64 Mach-O product fixture, feeds it through a con
 
 Run this stress suite before creating the immutable tag. The tag workflow starts from a clean macOS runner, verifies and generates the Live2D framework input, then builds and independently verifies the actual app and DMG. It deliberately does not repeat the fault-injection DMG stress immediately before the production build, because those tests exercise and terminate DiskImages helpers many times on the same host.
 
-## Create a draft GitHub Release
+## Create and publish a GitHub Release
 
-First update all three application versions to the same SemVer value on `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:
+Release automation deliberately stops at a draft. A maintainer publishes only after reviewing the assets and release notes, verifying downloaded checksums, and completing the available installation smokes. Version 0.1.5 has completed that manual publication step and is public; creating a future tag does not publish it automatically.
+
+For a future release, replace X.Y.Z with a new SemVer, update all three application versions to that value on `develop`, and wait for the required CI checks on the exact commit. Then create and push the matching unused tag:
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-Do not reuse or move an existing tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.5` with exactly these assets:
+Do not reuse or move an existing tag. A future version-tag workflow creates or refreshes a draft with the same naming pattern. The published v0.1.5 release contains exactly these assets:
 
 ```text
 Coding-Wife-v0.1.5-macOS-arm64.dmg
@@ -162,10 +170,10 @@ Coding-Wife-v0.1.5-Linux-x64.AppImage.sha256
 Download all eight draft assets into a clean directory and verify the exact bytes:
 
 ```bash
-shasum -a 256 --check Coding-Wife-v0.1.5-*.sha256
+shasum -a 256 --check Coding-Wife-v*.sha256
 ```
 
-Before changing the draft to public, review the bilingual release notes and complete a downloaded-artifact smoke on every available target. CI already performs package install/removal on each native runner, but it does not prove that Gatekeeper or SmartScreen allowed a human first launch without the documented bounded exception.
+Before publishing a future draft, review the bilingual release notes and complete a downloaded-artifact smoke on every available target. CI already performs package install/removal on each native runner, but it does not prove that Gatekeeper or SmartScreen allowed a human first launch without the documented bounded exception.
 
 ## Install and launch
 
@@ -185,6 +193,8 @@ Run `Coding-Wife-v0.1.5-Windows-x64-setup.exe`; the NSIS package installs for th
 
 Open the `.deb` with the system software installer on a compatible Ubuntu/Debian desktop. The AppImage is a portable fallback rather than an installer; set its executable bit and run it. Both are unsigned, so verify the SHA-256 sidecar first. Confirm the installed or extracted app starts, then remove the Debian package through the system package manager.
 
-## Release evidence still required
+## Current release status and next source release
 
-Before external judging, publish the reviewed draft URL and four checksums and record the available fresh-profile install and first-launch smokes. Developer ID signing, notarization, stapling, Windows code signing, Linux repository signing, unsupported architectures, and automatic updates are outside the current artifact and must not be claimed as complete.
+Public v0.1.5 already provides the four installers and four matching checksums described above. It remains an older preview and must not be presented as evidence for the current Terra/Luna orchestration or latest Chat and Commit UI.
+
+If the current Build Week source is distributed as a new binary, create a new immutable version tag, let the workflow create its draft, verify all downloaded checksums, repeat the available install and first-launch smokes, and publish that reviewed draft manually. Developer ID signing, notarization, stapling, Windows code signing, Linux repository signing, unsupported architectures, and automatic updates remain outside the current artifacts and must not be claimed as complete.

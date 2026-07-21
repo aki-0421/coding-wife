@@ -1,322 +1,232 @@
 # Coding Wife
 
-> A macOS desktop command center for developers who need to supervise long-running Codex work, review its evidence, and make bounded decisions without reconstructing the story from terminal logs.
+> A Live2D pair-programming workspace that turns long-running Codex sessions into bounded decisions, reviewable commits, and human-readable evidence.
 
-| Build Week item              | Verified repository status                                                                                                             |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended track            | **Developer Tools** — the primary user is a developer supervising agentic coding work. Final Devpost track selection is still pending. |
-| OpenAI model                 | **`gpt-5.6-sol`**, fixed in both the TypeScript and Rust contracts                                                                     |
-| Supported release target     | macOS 14 or later on Apple Silicon                                                                                                     |
-| Repository                   | [github.com/aki-0421/coding-wife](https://github.com/aki-0421/coding-wife)                                                             |
-| Public demo video            | **Pending** — no YouTube URL is recorded in this repository yet                                                                        |
-| Devpost project URL          | **Pending** — submission has not been recorded in this repository yet                                                                  |
-| Codex `/feedback` Session ID | **Pending** — it must be copied from the primary Codex thread into Devpost; no placeholder ID is presented as real                     |
-| Downloadable release         | **Pending** — the repository provides a reproducible source build, but no public artifact URL is recorded yet                          |
+Coding Wife is an OpenAI Build Week entry for the **Developer Tools** track. It is a bilingual desktop workspace for developers who delegate substantial coding work to Codex but still need to understand, steer, and review that work.
 
 ## Problem
 
-Developers supervising an autonomous coding session must correlate chat, tool output, file changes, test results, Git commits, and approval prompts across disconnected surfaces. Long sessions make it difficult to tell what changed, why it changed, whether it was verified, and where human judgment is still required.
+Long-running coding agents produce a story spread across chat, plans, tool calls, approval prompts, file changes, test output, and Git. Reconstructing that story is expensive: the developer must discover what changed, why it changed, what was verified, and which decisions still belong to a human.
 
 ## Solution
 
-Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D character communicates status and optional OpenAI text-to-speech without becoming a source of technical or safety authority.
+Coding Wife keeps the real coding session, human intervention points, and review evidence in one React 19 and Tauri 2 desktop app. GPT-5.6 Sol performs repository work, while isolated GPT-5.6 Terra and Luna roles turn verified commits and live session events into concise explanations and character presence. Rust owns the trust boundary; the Live2D character owns presentation, never technical authority.
 
-## What it does
+## Two-minute judge path
 
-1. Registers a writable Git project and restores its local workspaces, drafts, context versions, and activity.
-2. Sends a user instruction, validated project/character context, effort choice, and approved attachment handles to a local authenticated Codex session.
-3. Streams normalized plan, assistant, tool, file, test, Git, decision, and completion evidence into the workspace timeline.
-4. Lets the user answer explicit decisions, approve or reject a bounded operation, interrupt a turn, and inspect the resulting commit without giving the WebView generic shell or Git authority.
-5. Generates a separate, structured commit explanation from redacted evidence and presents captions or opt-in local macOS speech only after an explicit user action.
-6. Ships a verified Hiyori Live2D model and supports validated import, preview, selection, and deletion of custom character packs in app-private storage.
+After launching the current source build:
 
-## Fastest judging path
+1. Select **Add project** and choose a current-user-owned, writable Git repository. A disposable repository is recommended.
+2. Send: “Add a Usage section to README.md with one example command, run a relevant verification, and commit the result.”
+3. Review any bounded decision or approval request before continuing. Use **Stop** if the scope no longer matches your intent.
+4. Watch completed Codex messages become short Luna captions, expressions, and motions beside the conversation. Speech is optional.
+5. Open **Commit** and inspect the resulting change in the GitHub-style file navigator and unified diff.
+6. Choose **Explain changes** to present Terra’s redacted explanation of the verified commit.
 
-### Path A: deterministic interaction demo, no account required
+The model task itself may take longer than two minutes. The judge path is intentionally one narrow workflow: request, intervene, inspect the commit, and understand the result.
 
-Use this path to evaluate the complete workspace interaction quickly from any development checkout. After dependency installation, the interaction takes about two minutes.
+## What the product does
 
-```bash
+- Runs a real, authenticated local Codex App Server session against a selected Git project.
+- Streams assistant messages, plans, tool activity, file changes, decisions, approvals, failures, and completion through versioned contracts.
+- Keeps decisions bounded: the user can choose an option, provide a short alternative, approve or reject a scoped operation, or interrupt the turn.
+- Persists normalized and redacted workspace state in local SQLite so a session can recover without storing raw reasoning.
+- Shows read-only Git evidence through a GitHub-inspired commit changes experience: commit identity, changed files, diff statistics, and one lazy-loaded unified diff.
+- Presents session presence through a validated Live2D character, visible HTML captions, expression and motion cues, and optional caption-matched speech.
+- Supports the same product UI in English and Japanese.
+
+## GPT-5.6 orchestration
+
+The three models are one app-owned pipeline, not three user-facing chat personas.
+
+| Role | Exact model | Job | Authority |
+| --- | --- | --- | --- |
+| Main coder | **gpt-5.6-sol** | Understands the request, plans, uses coding tools, edits the selected repository, verifies work, asks bounded questions, and creates a reviewable commit. | The only write-capable role; it uses the selected local Codex workspace authority. |
+| Commit explainer | **gpt-5.6-terra** | Receives bounded, pathless, redacted evidence only after the app verifies a new reachable commit, then returns a strict structured explanation. | Zero external authority and no main-session writeback. |
+| Presence director | **gpt-5.6-luna** | Reacts to each completed main-agent message and selected semantic events with one short caption and semantic cue for expression, motion, and optional speech. | Zero external authority and no main-session writeback. |
+
+Terra and Luna receive no repository root and have no shell, file, Git, MCP, network, dynamic-tool, user-interaction, or main-session writeback authority. They run in separate short-lived support processes with bounded inputs and strict output schemas. A failed support role does not stop Sol, fabricate a chat event, or weaken the deterministic UI fallback.
+
+Luna does not narrate streaming tokens, raw tool output, code, diffs, paths, URLs, or secrets. Terra does not receive a raw diff. Both roles fail closed on stale scope, schema mismatch, private material, or an unverified runtime.
+
+The detailed contract is documented in [GPT-5.6 role orchestration](docs/research/gpt-5-6-role-orchestration.md).
+
+## Architecture
+
+~~~mermaid
+flowchart LR
+    U[Developer] --> UI[React 19 workspace]
+    UI --> IPC[Typed Tauri IPC]
+    IPC --> R[Rust trust boundary]
+    R --> C[Local Codex App Server]
+    C --> S[GPT-5.6 Sol]
+    R --> X[Isolated support runtime]
+    X --> T[GPT-5.6 Terra]
+    X --> L[GPT-5.6 Luna]
+    R --> DB[(Redacted local SQLite)]
+    R --> G[Read-only Git observer]
+    T --> P[Caption presentation]
+    L --> P
+    P --> H[Live2D expression and motion]
+    P -. optional .-> A[Native OpenAI speech]
+~~~
+
+- [Frontend features](src/features/) compose the workspace, conversation, commit review, narration, settings, and Live2D presentation.
+- [TypeScript contracts](src/lib/contracts/) validate every WebView-facing command and event.
+- [Rust services](src-tauri/src/) supervise Codex, enforce repository and process boundaries, normalize events, persist history, observe Git, and manage optional speech.
+- [Reviewed app skills](src-tauri/resources/skills/) are bundled resources with version and digest checks; they are not arbitrary repository instructions.
+
+## Human control and review
+
+### Bounded intervention
+
+The WebView cannot invoke a generic shell, arbitrary filesystem operation, or arbitrary Git command. It can send only typed requests. Rust revalidates workspace identity, generation, active-turn state, limits, and allowed operations before anything reaches Codex or native storage.
+
+Decisions and approvals remain explicit UI objects with scope and alternatives. Interrupt is a first-class action, not a prompt convention.
+
+### GitHub-style commit changes
+
+The Commit tab deliberately avoids internal observer, gate, producer, persistence, and risk properties. Its primary surface mirrors the information density of GitHub commit changes:
+
+- commit subject, author, relative time, short SHA, file count, additions, and deletions;
+- searchable changed-file navigation;
+- one selected file loaded on demand;
+- old and new line numbers, hunk headers, additions, deletions, and context;
+- failure shown as a restrained error state rather than a false success badge.
+
+The app-owned Git service is read-only. Sol may create a commit through its reviewed work unit; the observer verifies and explains that result but cannot stage, restore, revert, branch, or commit.
+
+### Live2D is presentation-only
+
+The character can make long work feel like pair programming, but it cannot approve a command, change a policy, declare verification successful, or hide an error. Captions remain visible HTML, and every consequential state also exists outside the canvas. Reduced-motion and text-only fallbacks preserve the workflow.
+
+## Trust, privacy, and speech
+
+- Core coding uses the user’s authenticated local Codex installation. Coding Wife does **not** require an application OPENAI_API_KEY, an env file, or a database server.
+- Codex requests necessarily send the selected instruction and approved context through the user’s Codex/OpenAI service. This is not an offline model.
+- The frontend receives normalized, bounded, redacted semantic events through typed IPC. Raw private reasoning is neither rendered nor stored as workspace history.
+- SQLite is local and app-owned. Support prompts, support responses, Luna captions, Terra transcripts, credentials, generated audio, and raw tool streams are excluded from durable history.
+- Optional TTS is **off by default**. It uses **gpt-4o-mini-tts** only after a user enters an OpenAI API key in App Settings.
+- The TTS key is stored by the native app in owner-readable private settings and is never returned to the WebView. Only the already validated visible caption is sent to the fixed Speech endpoint.
+- Native audio playback is currently implemented and end-to-end tested on macOS. English/Japanese caption fallback remains available on every packaging target when TTS is off or unavailable.
+- Temporary speech audio is bounded, played by the native layer, and deleted on completion, cancellation, mute, workspace switch, or app exit.
+
+See the approved [audio commentary contract](docs/requirements/audio-commentary.md) for the exact provider and fallback boundary.
+
+## Run the current Build Week source
+
+### Prerequisites
+
+- Node.js 22.12.0 or later and Corepack
+- pnpm 10.12.2, pinned by the repository
+- rustup; [rust-toolchain.toml](rust-toolchain.toml) selects the Rust toolchain
+- the native build tools for your operating system
+- a compatible local Codex installation authenticated with ChatGPT or the user’s Codex configuration
+- access to **gpt-5.6-sol**, **gpt-5.6-terra**, and **gpt-5.6-luna**
+- a current-user-owned, writable Git repository for a real coding turn
+
+### Install and launch
+
+~~~bash
 git clone https://github.com/aki-0421/coding-wife.git
 cd coding-wife
 corepack enable
 pnpm install --frozen-lockfile
-pnpm dev
-```
-
-Open <http://127.0.0.1:1420/?demoAppServer=1>, then:
-
-1. Keep the preselected workspace and enter `demo:success` in the composer.
-2. Select **Send**.
-3. When asked how to continue, select **One bounded unit**, then **Send answer**.
-4. Select **Approve once** for the simulated focused verification command.
-5. Inspect the resulting plan, tool, file, decision, and completion events. Open **Commit**, then **Evidence**, and select **Explain this commit** to inspect the deterministic explanation flow.
-
-This development-only path is intentionally labeled in the UI. It uses in-memory fixtures and does **not** call GPT, read or write Git, use native SQLite, or persist activity after restart. It proves the judge-visible interaction, not the production model integration.
-
-### Path B: production GPT-5.6 Sol path
-
-Use a macOS 14+ Apple Silicon machine with a compatible, authenticated local Codex installation. No application API key or environment variable is required. The native preflight requires a Git repository that is owned by the current user and writable.
-
-Create a disposable judge project so the real model can safely edit and commit:
-
-```bash
-JUDGE_REPO_PATH="$(mktemp -d /tmp/coding-wife-judge.XXXXXX)"
-git -C "$JUDGE_REPO_PATH" init -b main
-printf '# Judge fixture\n' >"$JUDGE_REPO_PATH/README.md"
-git -C "$JUDGE_REPO_PATH" add README.md
-git -C "$JUDGE_REPO_PATH" \
-  -c user.name="Build Week Judge" \
-  -c user.email="judge@example.invalid" \
-  commit -m "chore: seed judge fixture"
-printf '%s\n' "$JUDGE_REPO_PATH"
-```
-
-From the Coding Wife checkout, start the native app:
-
-```bash
 pnpm tauri:dev
-```
+~~~
 
-Then:
+No environment file is required. Do not put a TTS credential in the repository or in [.env.example](.env.example); configure it in **App Settings > Audio** only if speech is needed.
 
-1. Select **Add project** and choose the printed disposable repository path.
-2. Use the selected workspace, or select **Add workspace** to create a named session.
-3. Send: `Add a Usage section to README.md with one example command, run a relevant verification, and commit the result.`
-4. Review every decision before approving it. The disposable repository will contain real model-authored file and Git changes.
-5. After completion, inspect **Commit > Evidence** and select **Explain this commit** when explanation evidence is available.
-
-Expected result: the preflight confirms the exact model and capabilities, the activity timeline records normalized evidence, a commit appears in the read-only evidence view, and an explanation is shown only on explicit presentation. If authentication, model availability, repository ownership, or protocol compatibility is missing, the native boundary fails closed and reports a diagnostic instead of substituting demo data.
-
-## Why GPT-5.6 Sol is essential
-
-- **Exact model ID:** `gpt-5.6-sol`
-- **Primary job:** understand an open-ended repository request, plan work, use coding tools, edit files, run verification, handle user decisions, and produce a reviewable commit.
-- **Secondary job:** explain a completed commit from a separate, bounded, redacted evidence payload with no tools.
-- **Why deterministic code is insufficient:** validation and persistence can enforce boundaries, but they cannot replace the repository reasoning and tool use needed to complete an unfamiliar coding task. The browser fixture demonstrates this distinction by reproducing the UI contract without claiming model work.
-
-### Exact production call path
-
-| Stage                     | Code path                                                                                                                                                                                                        | Input, output, and responsibility                                                                                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Compose                   | [`src/features/workspace-persistence/codex-composition.ts`](src/features/workspace-persistence/codex-composition.ts) and [`turn-context.ts`](src/features/workspace-persistence/turn-context.ts)                 | Combines the authoritative user instruction with a versioned project/character snapshot marked as untrusted quoted context.                                                                  |
-| Frontend session boundary | [`src/features/codex/workspace-session-adapter.ts`](src/features/codex/workspace-session-adapter.ts)                                                                                                             | Validates workspace identity, active-turn state, text limits, effort, and attachment handles before emitting typed `codex_turn_start` IPC.                                                   |
-| Native supervisor         | [`src-tauri/src/codex/supervisor.rs`](src-tauri/src/codex/supervisor.rs) and [`commands.rs`](src-tauri/src/codex/commands.rs)                                                                                    | Revalidates the request, enforces one active or pending turn, binds workspace/generation/thread identity, probes the authenticated Codex binary, and injects the reviewed commit-work skill. |
-| App Server request        | [`src-tauri/src/codex/protocol.rs`](src-tauri/src/codex/protocol.rs) and [`types.rs`](src-tauri/src/codex/types.rs)                                                                                              | Sends `turn/start` with model `gpt-5.6-sol`, effort `low` or `max`, validated attachments, exactly one approved skill, and a structured decision output schema.                              |
-| Normalize and retain      | [`src-tauri/src/codex/normalizer.rs`](src-tauri/src/codex/normalizer.rs), [`src-tauri/src/workspace_history/`](src-tauri/src/workspace_history/), and [`src/lib/contracts/codex.ts`](src/lib/contracts/codex.ts) | Converts the App Server stream into versioned semantic events, redacts public text, rejects unsupported protocol shapes, persists durable events, and renders the timeline.                  |
-| Explain a commit          | [`src-tauri/src/codex/commit_explanation.rs`](src-tauri/src/codex/commit_explanation.rs), [`support.rs`](src-tauri/src/codex/support.rs), and [`src/features/git-review/`](src/features/git-review/)             | Runs an isolated, zero-tool support turn from bounded `CommitEvidenceV1`; validates structured output and waits for explicit presentation before captions or speech.                         |
-
-### Input
-
-- The user's public instruction, limited to 32,000 Unicode scalar values.
-- An immutable turn snapshot containing validated project and character context versions and hashes. The composed request is limited to 80,000 Unicode scalar values and labels context as non-authoritative data.
-- Up to ten validated, app-private attachment handles rather than arbitrary WebView file paths.
-- **Fast** mapped to reasoning effort `low`, or **Max** mapped to `max`.
-
-### Output
-
-The local Codex App Server returns a tool-using event stream. Coding Wife publishes normalized assistant, plan, tool, file, test, diff, pending-decision, diagnostic, Git, and completion evidence rather than raw protocol messages or private reasoning. The decision and commit-explanation paths use explicit JSON schemas before data reaches the UI.
-
-### Validation and guardrails
-
-- TypeScript and Rust both pin and verify `gpt-5.6-sol`; native preflight checks the authenticated binary, model availability, experimental API compatibility, and supported effort levels.
-- Both sides enforce schema versions, scalar limits, control-character rules, workspace/generation/thread identity, attachment constraints, and a single active turn.
-- The Rust normalizer redacts public fields, bounds output, and fails closed on unknown or unsafe protocol requests.
-- Technical and safety policy cannot be supplied by character context; the bundled commit-work skill is resolved from reviewed application resources.
-- Commit explanation uses a separate zero-tool support runtime, redacted evidence, structured output, sequence checks, and an explicit presentation gate before captioning or optional speech.
-
-### Verified Codex compatibility
-
-The release-approved support runtime identity is `codex-cli 0.144.5` for Apple Silicon, executable SHA-256 `5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2`, with canonical generated-schema fingerprint `efea5c6649ccbae7e26af47874bca302e0803d6db80571d57cd55841890dddbc`. The native support gate compares that exact identity and the isolation capability without exposing the executable path.
-
-Any other support binary, version, executable hash, schema fingerprint, or failed isolation proof is unapproved. In that state Coding Wife does not enqueue a support job, start a support process, or invoke the support model; it reports support as unavailable and retains the deterministic local commit-evidence fallback. This support gate is separate from main-session readiness, which still fails closed when its own authenticated App Server or model contract is unavailable.
-
-Commit explanation generation has no user-facing runtime, role, or model settings. The app-owned policy always keeps the required explainer role enabled, migrates legacy disabled preferences back to that policy at startup, and exposes only explanation-level actions such as request, retry, and cancel. Release readiness still has final authority: an unapproved or unavailable runtime produces a deterministic explanation fallback without changing the saved policy.
-
-## How we used Codex to build Coding Wife
-
-Codex coding agents were used throughout the repository workflow to turn written product contracts into the React/Tauri implementation, connect the TypeScript and Rust boundaries, add focused and regression tests, diagnose race and recovery failures, and harden release, privacy, accessibility, and supply-chain behavior. The commit history preserves these implementation and review units.
-
-Humans retained the consequential product and trust decisions:
-
-- Use the authenticated local Codex App Server instead of placing an OpenAI API key in the WebView.
-- Keep the WebView behind typed IPC; do not expose generic shell, arbitrary filesystem, or arbitrary Git commands.
-- Let the main Codex work unit create commits, while the app-owned Git evidence service remains a read-only observer.
-- Separate background commit-explanation generation from explicit caption and speech presentation.
-- Treat the Live2D character as presentation and status only, with equivalent HTML text and no authority over policy or verification.
-- Keep OpenAI TTS disabled by default, hold its optional API key behind the native boundary, and delete generated audio after playback.
-- Keep the no-credential demo deterministic and visibly non-production.
-
-The primary Codex `/feedback` Session ID required by Devpost has not been recorded in this repository. It must be taken from the actual primary thread and submitted without inventing or substituting an ID.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U[Developer] --> V[React workspace and Live2D view]
-    V --> I[Versioned TypeScript IPC]
-    I --> R[Rust trust boundary]
-    R --> C[Local Codex App Server]
-    C --> M[gpt-5.6-sol]
-    R --> H[(SQLite workspace history)]
-    R --> G[Read-only Git evidence]
-    R --> A[App-private attachments and character packs]
-    R --> N[Optional local macOS speech]
-    C --> R
-    H --> V
-    G --> V
-    A --> V
-    N --> U
-```
-
-- [`src/app/`](src/app/) selects native transports in Tauri and explicitly gated demo transports in browser development.
-- [`src/features/`](src/features/) owns workspace composition, localized UI, Codex state, Git evidence, narration, and Live2D presentation.
-- [`src/lib/contracts/`](src/lib/contracts/) defines exact, versioned payloads shared across the frontend boundaries.
-- [`src-tauri/src/`](src-tauri/src/) is the trusted native boundary for the Codex process, SQLite history, bounded Git observation, app-private files, character validation, and provider speech.
-- [`src-tauri/resources/skills/`](src-tauri/resources/skills/) contains the reviewed skills injected into main and support turns.
-
-SQLite stores normalized workspace metadata, drafts, context snapshots, and semantic events in the macOS application data directory. The primary work remains in the selected Git repository. Imported character packs and attachment snapshots are validated and copied into app-private storage rather than exposed as arbitrary paths to the WebView.
-
-## Built during OpenAI Build Week
-
-The audit boundary is commit `fbd7be97fe3805f916bb2cbe6f78f842caee3630`, the current merge base with `origin/develop`. It separates earlier research/specification assets from this branch's runnable implementation; it is **not** a claim that the baseline commit predates the official submission period.
-
-### At the audit boundary
-
-- Repository and agent configuration, the minimal Build Week README, and written product/research/specification documents existed.
-- There was no `package.json`, `src/`, or `src-tauri/` runnable application tree.
-
-### Added after the audit boundary
-
-- The complete React 19, Tauri 2, and Rust desktop application foundation.
-- The pinned `gpt-5.6-sol` Codex App Server integration, typed IPC, context composition, attachments, decisions, interruption, normalization, recovery, and bundled skills.
-- Durable SQLite workspace history and context editors.
-- Read-only Git commit evidence and the isolated commit-explanation/presentation flow.
-- The verified built-in Live2D runtime, custom character-pack management, and English/Japanese desktop UI.
-- macOS packaging, deterministic demo coverage, unit/integration/security tests, and submission documentation.
-
-Evidence can be inspected without trusting this summary:
-
-```bash
-git diff --stat fbd7be97fe3805f916bb2cbe6f78f842caee3630..HEAD
-git log --oneline fbd7be97fe3805f916bb2cbe6f78f842caee3630..HEAD
-```
-
-The implementation tree used for this README audit was `37b5330cefab76dce3b6332a1ac15acb19fca13e`; the README update itself changes no application code.
-
-## Setup
-
-### Prerequisites
-
-- macOS 14 or later on Apple Silicon for the supported native target.
-- Node.js 22.12.0 or later and Corepack.
-- pnpm 10.12.2, pinned by `packageManager`.
-- rustup; [`rust-toolchain.toml`](rust-toolchain.toml) selects Rust 1.88.0 with Clippy and rustfmt.
-- Xcode Command Line Tools for native development. See the release instructions for bundling requirements.
-- A compatible authenticated local Codex installation and a current-user-owned, writable Git repository for production turns.
-
-No `.env` values, application API keys, or database server are required for the core app or deterministic demo. Optional TTS requires a user-supplied OpenAI API key entered in App Settings and stored only in the owner-readable native settings file; [`.env.example`](.env.example) remains intentionally empty.
-
-### Install and run
-
-```bash
-corepack enable
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-`pnpm dev` serves the browser UI. The normal browser URL is a non-interactive reference preview; add `?demoAppServer=1` only for the explicit development demo described above.
-
-Before native development or `pnpm quality:check` on a fresh machine, install the locked Apple Silicon Cargo metadata used by the offline dependency-license gate and native build. Path A does not need this step.
-
-```bash
-cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
-```
-
-Then run the production native composition with:
-
-```bash
-pnpm tauri:dev
-```
-
-### Sample data and assets
-
-- Path A uses deterministic, in-memory demo workspaces and event fixtures from the repository. They reset on restart and never represent real model output.
-- Path B creates a user-owned temporary Git repository under `/tmp`; it contains no external data and can be discarded after judging.
-- The bundled Hiyori character and Cubism runtime have pinned provenance, checksums, and notices. Custom imported packs remain the user's responsibility.
+For a disposable judge project, initialize a small repository, create one seed commit, and select that directory through **Add project**. The app does not require proprietary sample data.
 
 ## Testing
 
-The canonical release-candidate validation starts and ends with a clean repository and runs every gate in the reviewed sequence:
+Common focused checks are:
 
-```bash
-git status --short
-pnpm quality:check
-git status --short
-```
+~~~bash
+pnpm typecheck
+pnpm test
+pnpm test:desktop
+~~~
 
-Both `git status --short` commands must print nothing. `pnpm quality:check` refuses a dirty worktree and verifies formatting, the offline locked-dependency license inventory, clean-checkout reproducibility, frontend and Rust quality, documentation, the Tauri bundle, and diff hygiene in a fixed sequence. Individual commands in the testing guide are focused, partial validation only; they do not replace this canonical gate or the pending fresh-profile/second-Mac install smoke.
+The desktop suite drives the real Tauri application, WKWebView, IPC, and Rust backend on macOS. Release-candidate gates and platform-specific build requirements are intentionally separate from routine development checks.
 
-For a focused diff-hygiene diagnosis, run `pnpm check:diff`; it is only one component of the canonical quality gate above.
+See [Testing Coding Wife](docs/testing.md) for CI coverage, desktop QA, packaging targets, installer verification, unsigned-package warnings, and the full release-candidate sequence.
 
-See [Testing Coding Wife](docs/testing.md) for command behavior, focused packaging tests, installation, and safe Gatekeeper guidance.
+## Public release and current source
 
-## Build the macOS artifact
+[Coding Wife v0.1.5](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.5) is public and includes SHA-256 sidecars for:
 
-```bash
-pnpm release:macos
-```
+| Packaging target | Published artifact |
+| --- | --- |
+| macOS Apple Silicon | DMG |
+| Windows x64 | NSIS setup executable |
+| Ubuntu/Debian-compatible Linux x64 | Debian package and AppImage |
 
-The verified output path is:
+**v0.1.5 is an older preview, not the exact Build Week judging build.** It predates 48 subsequent implementation commits that added Terra/Luna orchestration and the latest Chat and Commit interfaces. Use the current repository source and the launch steps above to evaluate the exact workflow described in this README.
 
-```text
-src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
-```
+Packaging availability is broader than end-to-end QA:
 
-The release workflow applies an ad-hoc integrity seal and verifies every resource, but the application has no Developer ID identity and is not notarized. A matching `v<version>` tag on `develop` now builds the same verified DMG on GitHub's Apple Silicon runner and places it with its SHA-256 in a draft GitHub Release. Build from reviewed source whenever possible. If Gatekeeper blocks a verified local or downloaded build, follow the bounded System Settings procedure in [the testing guide](docs/testing.md); do not disable Gatekeeper or remove quarantine globally. Developer ID signing, notarization, stapling, Intel/universal packaging, auto-update, a public checksum, and a public artifact URL are not complete until a tagged draft passes download and install smoke and is manually published.
+| Target | Package workflow | Primary app E2E QA | Optional TTS playback |
+| --- | --- | --- | --- |
+| macOS 14+ Apple Silicon | Built, mounted, and verified | Yes, real Tauri/WKWebView workflow | Yes |
+| Windows 11 x64 | Native install/uninstall workflow | Not the primary E2E target | No; captions remain |
+| Ubuntu 22.04 / Debian 12 x64 | Native package install/extract workflow | Not the primary E2E target | No; captions remain |
 
-## Privacy and security
+The packages are free of paid signing identities. macOS uses an ad-hoc integrity seal and is not notarized; Windows and Linux packages are unsigned. Verify the release URL, matching checksum, and reviewed source before using a downloaded preview. Bounded installation guidance is in [docs/testing.md](docs/testing.md).
 
-- No OpenAI credential is stored in the WebView or this application's environment. Codex requests use the authenticated local Codex installation; an optional TTS key is stored in an owner-readable native settings file and is never returned to the WebView.
-- Production instructions, selected repository context, and approved attachments are sent through Codex/OpenAI as required to perform the task; Coding Wife is not an offline model and does not claim that this content remains on-device.
-- SQLite persistence is local to the macOS app-data directory. The UI provides scoped history deletion that does not delete repository files, commits, or branches.
-- The frontend receives versioned, normalized, redacted events. The persistence contract excludes raw reasoning, raw secrets, support prompts/responses, and generated audio.
-- Git review is read-only and path-bounded. The main Codex session may edit and commit only inside the selected repository under its own reviewed workflow.
-- Character context is presentation-only, imported packs are validated and quarantined before selection, and a model never controls technical policy.
-- Optional speech uses the fixed OpenAI Speech endpoint, is off by default, requires a configured provider and visible caption/presentation scope, and deletes its owner-only temporary audio after playback.
+## Built during OpenAI Build Week
 
-## Third-party services and notices
+This repository existed as planning and research before the event. The runnable product was built during Build Week.
 
-| Component                         | Purpose                                          | Current notice or terms boundary                                                                    |
-| --------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| OpenAI Codex / `gpt-5.6-sol`      | Production coding and bounded commit explanation | Uses the judge's compatible authenticated local Codex configuration; no app API key is bundled      |
-| OpenAI Speech API                 | Optional caption-matched text-to-speech           | User-supplied key stays in owner-readable native settings; generated audio is temporary              |
-| Locked npm and Cargo dependencies | Conservative declared production/native closure  | [Generated inventory and attribution notice](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md) |
-| Live2D Cubism SDK for Web 5-r.5   | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)        |
-| Bundled Hiyori model              | Default character                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
+| Before the implementation sprint | Build Week implementation |
+| --- | --- |
+| Repository setup, product thesis, research, requirements, and screen specifications | React/Tauri application, local Codex integration, typed IPC, SQLite recovery, bounded decisions and approvals, read-only Git review, Live2D runtime, three-model orchestration, bilingual UI, QA, packaging, and submission documentation |
 
-The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and the 235 effective Cargo normal dependencies reported for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline, resolves every Cargo tree display to one exact metadata package ID, parses license expressions with a strict SPDX grammar, and fails when either lock changes, a committed notice is stale, a Cargo identity is ambiguous, an expression is malformed, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
+The commit history preserves the individual specification, implementation, review, and QA units without embedding a soon-stale final SHA in this README.
 
-Project-owned code is available under the repository's [MIT License](LICENSE). Third-party dependencies, the Live2D Cubism SDK, and the bundled Hiyori model remain governed by their own notices and terms; the project license does not replace those conditions.
+## How Codex helped build Coding Wife
+
+Codex agents converted written product contracts into the React and Rust implementation, traced protocol behavior across App Server boundaries, wrote focused tests and fixtures, diagnosed lifecycle and privacy failures, ran real desktop QA, and reviewed high-risk orchestration changes. Commits were kept small enough to show those units.
+
+Humans retained the consequential choices:
+
+- select a developer-supervision problem instead of building another generic chat client;
+- give only Sol repository-writing authority;
+- keep Terra and Luna isolated, ephemeral, redacted, and unable to write back;
+- use typed IPC instead of exposing shell, filesystem, or Git primitives to the WebView;
+- require verified commits before explanation and explicit UI decisions before consequential actions;
+- make Live2D and audio enjoyable but never authoritative;
+- keep optional speech disabled by default and its credential behind the native boundary;
+- prefer a narrow, reviewable workflow over unfinished feature breadth.
+
+## Why it fits the judging criteria
+
+| Criterion | Evidence in the product |
+| --- | --- |
+| Technological implementation | Real Codex App Server supervision, exact GPT-5.6 role routing, strict TypeScript/Rust contracts, isolated support runtimes, SQLite recovery, Git verification, and native desktop QA |
+| Design | One coherent request-to-commit path, bounded human intervention, quiet operation rows, GitHub-style review, bilingual UI, accessibility fallbacks, and character presence |
+| Potential impact | Reduces the time developers spend reconstructing and reviewing long agent sessions while preserving responsibility |
+| Quality of the idea | Treats orchestration, evidence, and a human-like companion as one workflow rather than adding a mascot to a terminal clone |
 
 ## Honest limitations
 
-- Only macOS 14+ on Apple Silicon is supported and tested for this release; Windows, Linux, and Intel Mac are not claimed.
-- A compatible authenticated local Codex installation is required for real GPT work. The browser demo is deliberately synthetic.
-- The current artifact has only an ad-hoc integrity seal, no Developer ID signature or notarization, and no public binary URL or checksum is recorded.
+- The current three-model Build Week source must be built locally; the public v0.1.5 installers are an older preview.
+- Real coding requires a compatible authenticated Codex installation and availability of all three exact GPT-5.6 models. Unsupported or rerouted roles fail closed.
+- Primary end-to-end desktop QA is macOS Apple Silicon. Windows and Linux have packaging verification, not equivalent full-workflow QA.
+- Optional OpenAI speech playback is macOS-only today. Captions, expression cues, and the core coding workflow do not depend on speech.
+- Published packages are not backed by paid platform signing identities or notarization.
 - Workspace history is local; there is no account, cloud sync, remote collaboration, or automatic backup service.
-- Locale UI supports English and Japanese, but this README does not claim native preference persistence beyond the behavior verified in the app.
-- External submission URLs, the primary Codex Session ID, and independent install evidence remain pending.
+- Imported Live2D packs remain subject to their creators’ rights and the Live2D terms.
 
-## Submission completion checklist
+## License and notices
 
-- [x] English judge path, exact model ID, call path, input/output validation, architecture, testing, and Build Week boundary documented.
-- [x] Reproducible macOS source build and honest deterministic UI demo documented.
-- [x] Locked dependency inventory, attribution notice, and Live2D/Hiyori terms are generated and packaged.
-- [ ] Confirm **Developer Tools** as the final Devpost track selection.
-- [x] Add and review a repository-level project license.
-- [ ] Record a public, under-three-minute YouTube demo and replace the pending status above.
-- [ ] Create the Devpost project and record its public URL.
-- [ ] Submit the actual primary Codex `/feedback` Session ID in Devpost.
-- [ ] Publish the reviewed DMG and checksum, or clearly instruct judges to build from source.
-- [ ] Record a fresh-profile or second-Mac install and first-launch smoke.
+Project-owned code is available under the [MIT License](LICENSE).
+
+Third-party software and character assets retain their own terms:
+
+- [Generated dependency inventory and attributions](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md)
+- [Packaged third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)
+- [Bundled Hiyori model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)
+
+The project license does not replace the OpenAI, Live2D Cubism SDK, Hiyori model, or dependency-specific terms.
