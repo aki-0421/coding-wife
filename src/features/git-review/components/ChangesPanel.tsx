@@ -122,15 +122,17 @@ function DiffContent({
 }: Pick<ChangesPanelProps, "copy" | "diffStatus" | "diff">) {
   if (diffStatus === "idle") {
     return (
-      <p className="m-auto w-full min-w-0 px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
-        {copy.chooseFile}
-      </p>
+      <div className="flex min-h-0 w-full min-w-0 flex-1 self-stretch">
+        <p className="m-auto w-full min-w-0 max-w-[28rem] px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
+          {copy.chooseFile}
+        </p>
+      </div>
     )
   }
   if (diffStatus === "loading") {
     return (
       <div
-        className="flex size-full min-w-0 flex-col gap-sm p-md"
+        className="flex size-full min-w-0 flex-1 self-stretch flex-col gap-sm p-md"
         aria-live="polite"
       >
         <span className="flex items-center gap-xs text-caption text-muted-foreground">
@@ -148,28 +150,32 @@ function DiffContent({
   }
   if (diffStatus === "error" || diff === null) {
     return (
-      <p className="m-auto flex w-full min-w-0 max-w-md items-start gap-xs px-lg text-caption whitespace-normal text-destructive break-words">
-        <AlertCircleIcon
-          aria-hidden="true"
-          className="mt-xxs size-3 shrink-0"
-        />
-        {copy.diffError}
-      </p>
+      <div className="flex min-h-0 w-full min-w-0 flex-1 self-stretch">
+        <p className="m-auto flex w-full min-w-0 max-w-[28rem] items-start gap-xs px-lg text-caption whitespace-normal text-destructive break-words">
+          <AlertCircleIcon
+            aria-hidden="true"
+            className="mt-xxs size-3 shrink-0"
+          />
+          {copy.diffError}
+        </p>
+      </div>
     )
   }
   if (diff.state !== "text") {
     return (
       <div
-        className="m-auto flex w-full min-w-0 max-w-md flex-col items-center gap-xs px-lg text-center"
+        className="flex min-h-0 w-full min-w-0 flex-1 self-stretch"
         data-git-diff-state={diff.state}
       >
-        <FileCode2Icon
-          aria-hidden="true"
-          className="size-5 text-muted-foreground"
-        />
-        <p className="m-0 w-full min-w-0 text-caption whitespace-normal text-foreground break-words">
-          {copy.diffStates[diff.state]}
-        </p>
+        <div className="m-auto flex w-full min-w-0 max-w-[28rem] flex-col items-center gap-xs px-lg text-center">
+          <FileCode2Icon
+            aria-hidden="true"
+            className="size-5 text-muted-foreground"
+          />
+          <p className="m-0 w-full min-w-0 text-caption whitespace-normal text-foreground break-words">
+            {copy.diffStates[diff.state]}
+          </p>
+        </div>
       </div>
     )
   }
@@ -177,18 +183,20 @@ function DiffContent({
   const parsed = parseUnifiedDiff(diff.content)
   if (parsed.status !== "ready") {
     return (
-      <p className="m-auto w-full min-w-0 max-w-md px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
-        {parsed.status === "render_limit"
-          ? copy.diffRenderLimit
-          : copy.diffEmpty}
-      </p>
+      <div className="flex min-h-0 w-full min-w-0 flex-1 self-stretch">
+        <p className="m-auto w-full min-w-0 max-w-[28rem] px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
+          {parsed.status === "render_limit"
+            ? copy.diffRenderLimit
+            : copy.diffEmpty}
+        </p>
+      </div>
     )
   }
 
   return (
     <ScrollArea
       aria-label={copy.diffLabel(diff.relativePath)}
-      className="size-full bg-code-chip"
+      className="size-full min-w-0 flex-1 self-stretch bg-code-chip"
       data-git-diff-scroll=""
     >
       <div className="min-w-max py-xs font-mono text-code leading-relaxed text-code-text">
@@ -326,7 +334,7 @@ export function ChangesPanel({
 
   return (
     <section
-      className="git-changes-panel flex size-full min-h-0 flex-col"
+      className="git-changes-panel flex size-full min-h-0 min-w-0 flex-col"
       data-git-file-section=""
     >
       <div
@@ -370,7 +378,7 @@ export function ChangesPanel({
         </Popover>
       </div>
 
-      <div className="git-changes-layout grid min-h-0 flex-1 grid-cols-[minmax(210px,32%)_minmax(0,1fr)]">
+      <div className="git-changes-layout grid min-h-0 w-full min-w-0 flex-1 grid-cols-[minmax(210px,32%)_minmax(0,1fr)]">
         <aside
           className="git-file-navigator flex min-h-0 flex-col border-r border-divider bg-sidebar/10"
           data-git-path-navigation="desktop"
@@ -394,7 +402,7 @@ export function ChangesPanel({
           </ScrollArea>
         </aside>
 
-        <div className="flex min-h-0 min-w-0 flex-col bg-code-chip/70">
+        <div className="flex min-h-0 w-full min-w-0 flex-col bg-code-chip/70">
           {selectedFile === null ? (
             <p className="m-auto text-caption text-muted-foreground">
               {copy.chooseFile}
@@ -493,7 +501,7 @@ export function ChangesPanel({
                 </Tooltip>
               </header>
               {expanded ? (
-                <div className="flex min-h-0 flex-1">
+                <div className="flex min-h-0 w-full min-w-0 flex-1 self-stretch">
                   <DiffContent
                     copy={copy}
                     diff={diff}

@@ -11,6 +11,7 @@ import {
   DemoGitReviewTransport,
   demoCurrentCommitEvidenceId,
 } from "@/features/git-review/demo-transport"
+import { maximumRenderedDiffLines } from "@/features/git-review/unified-diff"
 import type {
   CommitDiffFile,
   CommitEvidenceDetail,
@@ -32,6 +33,7 @@ function renderPanel(
   locale: "en" | "ja",
   diffStatus: ChangesPanelProps["diffStatus"],
   state: DiffContentState | null,
+  content = "",
 ) {
   const file = detail.files[0]
   if (file === undefined) throw new Error("Demo detail has no changed file")
@@ -45,7 +47,7 @@ function renderPanel(
           relativePath: file.relativePath,
           changeKind: file.changeKind,
           state,
-          content: "",
+          content,
           byteCount: 0,
           additions: 0,
           deletions: 0,
@@ -73,20 +75,54 @@ describe("ChangesPanel fallback widths", () => {
     (locale) => {
       const copy = gitReviewCopy[locale]
       const idle = renderPanel(locale, "idle", null)
-      expect(screen.getByText(copy.chooseFile).closest(".w-full")).toHaveClass(
+      const idleMessage = screen.getByText(copy.chooseFile)
+      expect(idleMessage).toHaveClass("max-w-[28rem]")
+      expect(idleMessage.parentElement).toHaveClass(
+        "w-full",
         "min-w-0",
+        "flex-1",
+        "self-stretch",
       )
       idle.unmount()
 
       const error = renderPanel(locale, "error", null)
-      expect(screen.getByText(copy.diffError).closest(".w-full")).toHaveClass(
+      const errorMessage = screen.getByText(copy.diffError)
+      expect(errorMessage).toHaveClass("max-w-[28rem]")
+      expect(errorMessage.parentElement).toHaveClass(
+        "w-full",
         "min-w-0",
+        "flex-1",
+        "self-stretch",
       )
       error.unmount()
 
-      renderPanel(locale, "ready", "text")
-      expect(screen.getByText(copy.diffEmpty).closest(".w-full")).toHaveClass(
+      const empty = renderPanel(locale, "ready", "text")
+      const emptyMessage = screen.getByText(copy.diffEmpty)
+      expect(emptyMessage).toHaveClass("max-w-[28rem]")
+      expect(emptyMessage.parentElement).toHaveClass(
+        "w-full",
         "min-w-0",
+        "flex-1",
+        "self-stretch",
+      )
+      empty.unmount()
+
+      renderPanel(
+        locale,
+        "ready",
+        "text",
+        Array.from(
+          { length: maximumRenderedDiffLines + 1 },
+          () => " context",
+        ).join("\n"),
+      )
+      const renderLimitMessage = screen.getByText(copy.diffRenderLimit)
+      expect(renderLimitMessage).toHaveClass("max-w-[28rem]")
+      expect(renderLimitMessage.parentElement).toHaveClass(
+        "w-full",
+        "min-w-0",
+        "flex-1",
+        "self-stretch",
       )
     },
   )
@@ -99,6 +135,8 @@ describe("ChangesPanel fallback widths", () => {
       expect(loading.closest('[aria-live="polite"]')).toHaveClass(
         "size-full",
         "min-w-0",
+        "flex-1",
+        "self-stretch",
       )
     },
   )
@@ -115,12 +153,51 @@ describe("ChangesPanel fallback widths", () => {
     const message = screen.getByText(gitReviewCopy[locale].diffStates[state])
     const stateContainer = message.closest("[data-git-diff-state]")
     expect(stateContainer).toHaveAttribute("data-git-diff-state", state)
-    expect(stateContainer).toHaveClass("w-full", "min-w-0")
+    expect(stateContainer).toHaveClass(
+      "w-full",
+      "min-w-0",
+      "flex-1",
+      "self-stretch",
+    )
+    expect(stateContainer?.parentElement).toHaveClass(
+      "w-full",
+      "min-w-0",
+      "flex-1",
+      "self-stretch",
+    )
+    expect(message.parentElement).toHaveClass("w-full", "max-w-[28rem]")
+    expect(message.parentElement).not.toHaveClass("max-w-md")
     expect(message).toHaveClass(
       "w-full",
       "min-w-0",
       "whitespace-normal",
       "break-words",
+    )
+  })
+
+  it("keeps text diffs in a full-width internal overflow surface", () => {
+    const { container } = renderPanel(
+      "en",
+      "ready",
+      "text",
+      `@@ -1 +1 @@\n-old\n+${"x".repeat(300)}`,
+    )
+
+    expect(container.querySelector("[data-git-file-section]")).toHaveClass(
+      "size-full",
+      "min-w-0",
+    )
+    expect(container.querySelector(".git-changes-layout")).toHaveClass(
+      "w-full",
+      "min-w-0",
+    )
+    const scroll = container.querySelector("[data-git-diff-scroll]")
+    expect(scroll).toHaveClass("size-full", "min-w-0", "flex-1", "self-stretch")
+    expect(scroll?.parentElement).toHaveClass(
+      "w-full",
+      "min-w-0",
+      "flex-1",
+      "self-stretch",
     )
   })
 })
