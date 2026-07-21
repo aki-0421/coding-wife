@@ -654,6 +654,17 @@ const presenceCueAllowlist: Readonly<
   turn_completed: ["success", "neutral"],
 }
 
+const presencePriorityByTrigger: Readonly<
+  Record<PresenceDirectionTrigger, PresenceDirectionPriority>
+> = {
+  decision_wait: "high",
+  recoverable_failure: "high",
+  terminal_failure: "high",
+  long_milestone: "low",
+  commit_ready: "normal",
+  turn_completed: "normal",
+}
+
 function isPresenceDirectionUtterance(value: unknown): value is string {
   if (typeof value !== "string") return false
   const characters: string[] = []
@@ -978,6 +989,7 @@ export function parsePresenceDirectionEvent(
     !isPresenceDirectionCue(value.cue) ||
     !presenceCueAllowlist[value.trigger].includes(value.cue) ||
     !isPresenceDirectionPriority(value.priority) ||
+    value.priority !== presencePriorityByTrigger[value.trigger] ||
     value.modelRole !== "presence_director" ||
     value.model !== "gpt-5.6-luna" ||
     !isRfc3339Timestamp(value.occurredAt)

@@ -160,6 +160,12 @@ interface PresenceCaptionGate {
   acknowledgmentTimer: ReturnType<typeof setTimeout> | null
 }
 
+interface PendingPresenceScopeSync {
+  readonly epoch: number
+  readonly request: PresenceDirectionScopeRequestV1
+  readonly source: PresenceDirectionConsumerPort
+}
+
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
 const speechTimeoutMilliseconds = 50_000
@@ -202,6 +208,16 @@ function presentationStatus(
 ): CommitNarrationPresentationStatus {
   if (status === "failed") return "unavailable"
   return status
+}
+
+export function isActiveCommitNarrationPresentation(
+  presentation: CommitNarrationPresentationSnapshot | null,
+): boolean {
+  return (
+    presentation?.status === "preparing" ||
+    presentation?.status === "streaming" ||
+    presentation?.status === "ready"
+  )
 }
 
 function sameSourceKey(
@@ -265,6 +281,9 @@ export class NarrationController {
   #presenceSourceDisconnect: (() => void) | null = null
   #presenceSource: PresenceDirectionConsumerPort | null = null
   #scopeEpoch = 0
+  #scopeWriteChain: Promise<void> = Promise.resolve()
+  #presenceScopeDesired: PendingPresenceScopeSync | null = null
+  #presenceScopeDrain: Promise<void> | null = null
   #presentationGeneration = 0
   #speechEpoch = 0
   #speechChain: Promise<void> = Promise.resolve()
@@ -317,6 +336,9 @@ export class NarrationController {
       disconnect?.()
       this.#presenceSourceDisconnect = null
       this.#presenceSource = null
+      if (this.#presenceScopeDesired?.source === source) {
+        this.#presenceScopeDesired = null
+      }
     }
   }
 
@@ -466,7 +488,7 @@ export class NarrationController {
     }
   }
 
-  public async setScope(scope: NarrationScope): Promise<boolean> {
+  public setScope(scope: NarrationScope): Promise<boolean> {
     const highestGeneration = this.#scopeGenerationHighWater.get(
       scope.workspaceId,
     )
@@ -475,47 +497,28 @@ export class NarrationController {
       scope.generation < highestGeneration
     ) {
       this.update({ lastErrorCode: "NARRATION-SCOPE-ROLLBACK" })
-      return false
-    }
-    const sameNativeScope =
-      this.#snapshot.scope?.workspaceId === scope.workspaceId &&
-      this.#snapshot.scope.generation === scope.generation
-    if (sameNativeScope && this.#snapshot.scope?.locale === scope.locale) {
-      this.syncPresenceScope(scope)
-      return true
-    }
-    if (sameNativeScope) {
-      await this.dismissPresence("workspace_switch")
-      this.update({ scope, lastErrorCode: null })
-      this.syncPresenceScope(scope)
-      return true
+      return Promise.resolve(false)
     }
     this.#scopeGenerationHighWater.set(scope.workspaceId, scope.generation)
     const epoch = ++this.#scopeEpoch
-    await this.dismissPresence("workspace_switch")
-    if (
-      this.#snapshot.scope !== null &&
-      this.#snapshot.presentation?.status !== "canceled"
-    ) {
-      await this.dismissPresentation("workspace_switch")
+    const intent: NarrationScope = {
+      workspaceId: scope.workspaceId,
+      generation: scope.generation,
+      ...(scope.locale === undefined ? {} : { locale: scope.locale }),
     }
-    try {
-      await this.gateway.setScope({
-        schemaVersion: narrationSchemaVersion,
-        workspaceId: scope.workspaceId,
-        generation: scope.generation,
-      })
-      if (epoch !== this.#scopeEpoch) return false
-      this.dropStalePrepared(scope)
-      this.update({ scope, lastErrorCode: null })
-      this.syncPresenceScope(scope)
-      return true
-    } catch (error) {
+    const operation = this.#scopeWriteChain.then(() =>
+      this.applyScope(intent, epoch),
+    )
+    this.#scopeWriteChain = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation.catch((error: unknown) => {
       if (epoch === this.#scopeEpoch) {
         this.update({ lastErrorCode: errorCode(error) })
       }
       return false
-    }
+    })
   }
 
   public consume(value: unknown): boolean {
@@ -619,7 +622,7 @@ export class NarrationController {
       event.locale !== scope.locale ||
       (highestGeneration !== undefined &&
         event.workspaceGeneration < highestGeneration) ||
-      this.#snapshot.presentation !== null
+      isActiveCommitNarrationPresentation(this.#snapshot.presentation)
     ) {
       return false
     }
@@ -678,9 +681,9 @@ export class NarrationController {
   public async activatePresentation(
     key: CommitNarrationSourceKey,
   ): Promise<boolean> {
-    await this.dismissPresence("explicit_cancel")
-    if (this.#snapshot.presentation !== null) {
-      if (!sameSourceKey(this.#snapshot.presentation.key, key)) {
+    if (isActiveCommitNarrationPresentation(this.#snapshot.presentation)) {
+      const presentation = this.#snapshot.presentation
+      if (presentation !== null && !sameSourceKey(presentation.key, key)) {
         await this.dismissPresentation("explicit_cancel")
       } else {
         await this.cancelSpeech("explicit_cancel")
@@ -704,8 +707,15 @@ export class NarrationController {
     ) {
       return false
     }
+    const preparedActive =
+      prepared.status === "preparing" ||
+      prepared.status === "streaming" ||
+      prepared.status === "ready"
+    if (preparedActive) {
+      await this.dismissPresence("explicit_cancel")
+    }
     const generation = ++this.#presentationGeneration
-    this.#speechEpoch++
+    if (preparedActive) this.#speechEpoch++
     this.clearCaptionSpeechGate()
     this.#snapshot = {
       ...this.#snapshot,
@@ -779,7 +789,7 @@ export class NarrationController {
       scope.workspaceId !== presence.workspaceId ||
       scope.generation !== presence.workspaceGeneration ||
       scope.locale !== presence.locale ||
-      this.#snapshot.presentation !== null
+      isActiveCommitNarrationPresentation(this.#snapshot.presentation)
     ) {
       return false
     }
@@ -1003,6 +1013,58 @@ export class NarrationController {
     )
   }
 
+  private async applyScope(
+    scope: NarrationScope,
+    epoch: number,
+  ): Promise<boolean> {
+    if (epoch !== this.#scopeEpoch) return false
+
+    const sameNativeScope =
+      this.#snapshot.scope?.workspaceId === scope.workspaceId &&
+      this.#snapshot.scope.generation === scope.generation
+    const sameLocale =
+      sameNativeScope && this.#snapshot.scope?.locale === scope.locale
+    if (sameLocale) {
+      this.syncPresenceScope(scope, epoch)
+      return true
+    }
+
+    await this.dismissPresence("workspace_switch")
+    if (epoch !== this.#scopeEpoch) return false
+
+    if (sameNativeScope) {
+      this.update({ scope, lastErrorCode: null })
+      this.syncPresenceScope(scope, epoch)
+      return true
+    }
+
+    if (
+      this.#snapshot.scope !== null &&
+      isActiveCommitNarrationPresentation(this.#snapshot.presentation)
+    ) {
+      await this.dismissPresentation("workspace_switch")
+      if (epoch !== this.#scopeEpoch) return false
+    }
+
+    try {
+      await this.gateway.setScope({
+        schemaVersion: narrationSchemaVersion,
+        workspaceId: scope.workspaceId,
+        generation: scope.generation,
+      })
+      if (epoch !== this.#scopeEpoch) return false
+      this.dropStalePrepared(scope)
+      this.update({ scope, lastErrorCode: null })
+      this.syncPresenceScope(scope, epoch)
+      return true
+    } catch (error) {
+      if (epoch === this.#scopeEpoch) {
+        this.update({ lastErrorCode: errorCode(error) })
+      }
+      return false
+    }
+  }
+
   private recordPresenceDedupe(keys: readonly string[]): void {
     for (const key of keys) {
       if (this.#presenceDedupe.has(key)) continue
@@ -1018,7 +1080,10 @@ export class NarrationController {
     }
   }
 
-  private syncPresenceScope(scope: NarrationScope | null): void {
+  private syncPresenceScope(
+    scope: NarrationScope | null,
+    epoch = this.#scopeEpoch,
+  ): void {
     if (
       scope?.locale === undefined ||
       this.#presenceSource?.setScope === undefined
@@ -1031,9 +1096,52 @@ export class NarrationController {
       workspaceGeneration: scope.generation,
       locale: scope.locale,
     }
-    void this.#presenceSource.setScope(request).catch(() => {
-      // Luna scheduling is optional and must not block the main workspace scope.
-    })
+    this.#presenceScopeDesired = {
+      epoch,
+      request,
+      source: this.#presenceSource,
+    }
+    this.startPresenceScopeDrain()
+  }
+
+  private startPresenceScopeDrain(): void {
+    if (
+      this.#presenceScopeDrain !== null ||
+      this.#presenceScopeDesired === null
+    ) {
+      return
+    }
+    const drain = this.drainPresenceScopes()
+    this.#presenceScopeDrain = drain
+    void drain.then(
+      () => this.finishPresenceScopeDrain(drain),
+      () => this.finishPresenceScopeDrain(drain),
+    )
+  }
+
+  private finishPresenceScopeDrain(drain: Promise<void>): void {
+    if (this.#presenceScopeDrain !== drain) return
+    this.#presenceScopeDrain = null
+    this.startPresenceScopeDrain()
+  }
+
+  private async drainPresenceScopes(): Promise<void> {
+    while (this.#presenceScopeDesired !== null) {
+      const desired = this.#presenceScopeDesired
+      this.#presenceScopeDesired = null
+      if (
+        desired.epoch !== this.#scopeEpoch ||
+        desired.source !== this.#presenceSource ||
+        desired.source.setScope === undefined
+      ) {
+        continue
+      }
+      try {
+        await desired.source.setScope(desired.request)
+      } catch {
+        // Luna scheduling is optional and must not block the main workspace scope.
+      }
+    }
   }
 
   private preparePresenceCaptionSpeech(): void {
@@ -1164,7 +1272,7 @@ export class NarrationController {
       scope?.workspaceId === presence.workspaceId &&
       scope.generation === presence.workspaceGeneration &&
       scope.locale === presence.locale &&
-      this.#snapshot.presentation === null
+      !isActiveCommitNarrationPresentation(this.#snapshot.presentation)
     )
   }
 
@@ -1565,9 +1673,8 @@ export class NarrationController {
 
   private activeMatches(key: CommitNarrationSourceKey): boolean {
     return (
+      isActiveCommitNarrationPresentation(this.#snapshot.presentation) &&
       this.#snapshot.presentation !== null &&
-      this.#snapshot.presentation.status !== "canceled" &&
-      this.#snapshot.presentation.status !== "unavailable" &&
       sameSourceKey(this.#snapshot.presentation.key, key)
     )
   }

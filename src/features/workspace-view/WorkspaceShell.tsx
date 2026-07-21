@@ -37,6 +37,7 @@ import type { GitReviewTransport } from "@/features/git-review/transport"
 import { useI18n } from "@/features/localization"
 import {
   CommitNarrationCaption,
+  isActiveCommitNarrationPresentation,
   type NarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
@@ -222,7 +223,7 @@ export function WorkspaceShell({
     narration.presentation?.key.workspaceId === selectedWorkspaceId &&
     narration.presentation.key.workspaceGeneration === workspaceGeneration &&
     narration.presentation.key.locale === locale &&
-    narration.presentation.status !== "canceled"
+    isActiveCommitNarrationPresentation(narration.presentation)
       ? narration.presentation
       : null
   const previousSelectedWorkspaceId = useRef<string | null>(null)

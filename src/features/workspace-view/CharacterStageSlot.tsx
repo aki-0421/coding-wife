@@ -12,6 +12,7 @@ import {
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import {
+  isActiveCommitNarrationPresentation,
   PresenceDirectionCaption,
   useNarrationController,
   useNarrationSnapshot,
@@ -55,16 +56,12 @@ export function CharacterStageSlot({
   const narration = useNarrationSnapshot()
   const CharacterRenderer = renderer
   const presentation =
-    narration.presentation?.key.workspaceId === workspaceId &&
-    narration.presentation.status !== "canceled"
+    narration.presentation?.key.workspaceId === workspaceId
       ? narration.presentation
       : null
-  const presentationActive =
-    presentation?.status === "preparing" ||
-    presentation?.status === "streaming" ||
-    presentation?.status === "ready"
+  const presentationActive = isActiveCommitNarrationPresentation(presentation)
   const presence =
-    presentation === null &&
+    !presentationActive &&
     workspaceGeneration !== null &&
     narration.presence?.workspaceId === workspaceId &&
     narration.presence.workspaceGeneration === workspaceGeneration &&
@@ -73,8 +70,9 @@ export function CharacterStageSlot({
       ? narration.presence
       : null
   const speaking =
-    presentation?.speechStatus === "queued" ||
-    presentation?.speechStatus === "playing" ||
+    (presentationActive &&
+      (presentation?.speechStatus === "queued" ||
+        presentation?.speechStatus === "playing")) ||
     presence?.speechStatus === "queued" ||
     presence?.speechStatus === "playing"
   const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted

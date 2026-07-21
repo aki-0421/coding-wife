@@ -308,6 +308,97 @@ describe("NarrationController", () => {
     })
   })
 
+  it("keeps the latest locale intent when an older dismissal resolves late", async () => {
+    const { controller, gateway } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+    expect(controller.consumePresence(presenceEvent())).toBe(true)
+
+    let releaseCancellation!: () => void
+    vi.spyOn(gateway, "cancel").mockImplementationOnce((reason) => {
+      gateway.cancelReasons.push(reason)
+      return new Promise<void>((resolve) => {
+        releaseCancellation = resolve
+      })
+    })
+
+    const older = controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "en",
+    })
+    await vi.waitFor(() =>
+      expect(gateway.cancelReasons).toContain("workspace_switch"),
+    )
+    const latest = controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    releaseCancellation()
+    await expect(older).resolves.toBe(false)
+    await expect(latest).resolves.toBe(true)
+    expect(controller.getSnapshot().scope).toEqual({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+  })
+
+  it("serializes Luna scope writes and coalesces to the latest desired scope", async () => {
+    const { controller } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    let releaseInitial!: () => void
+    const setScope =
+      vi.fn<NonNullable<PresenceDirectionConsumerPort["setScope"]>>()
+    setScope.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseInitial = resolve
+        }),
+    )
+    setScope.mockResolvedValue(undefined)
+    controller.connectPresence({
+      subscribe: () => () => undefined,
+      setScope,
+    })
+    expect(setScope).toHaveBeenCalledTimes(1)
+
+    await expect(
+      controller.setScope({
+        workspaceId: "workspace-1",
+        generation: 4,
+        locale: "en",
+      }),
+    ).resolves.toBe(true)
+    await expect(
+      controller.setScope({
+        workspaceId: "workspace-1",
+        generation: 5,
+        locale: "ja",
+      }),
+    ).resolves.toBe(true)
+    expect(setScope).toHaveBeenCalledTimes(1)
+
+    releaseInitial()
+    await vi.waitFor(() => expect(setScope).toHaveBeenCalledTimes(2))
+    expect(setScope.mock.calls[1]?.[0]).toEqual({
+      schemaVersion: narrationSchemaVersion,
+      workspaceId: "workspace-1",
+      workspaceGeneration: 5,
+      locale: "ja",
+    })
+  })
+
   it("releases a visible Luna caption to byte-identical event speech after its lead", async () => {
     const leads: Array<() => void> = []
     const pauseDurations: number[] = []
@@ -363,11 +454,11 @@ describe("NarrationController", () => {
   it("maps each Luna trigger to deterministic narration semantics", async () => {
     const cases = [
       ["decision_wait", "asking", "waiting_for_user", "high"],
-      ["recoverable_failure", "warning", "error", "normal"],
+      ["recoverable_failure", "warning", "error", "high"],
       ["terminal_failure", "error", "error", "high"],
       ["long_milestone", "working", "progress", "low"],
       ["commit_ready", "success", "commit_observed", "normal"],
-      ["turn_completed", "success", "progress", "low"],
+      ["turn_completed", "success", "progress", "normal"],
     ] as const
 
     for (const [trigger, cue, semanticType, priority] of cases) {
@@ -455,6 +546,74 @@ describe("NarrationController", () => {
       ),
     ).toBe(false)
     expect(gateway.speech).toHaveLength(0)
+  })
+
+  it("allows Luna intake, acknowledgment, and speech after Terra is canceled", async () => {
+    const { controller, gateway } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+    const key = prepare(controller, ["取り消す説明です。"])
+    await controller.activatePresentation(key)
+    await controller.cancelPresentation()
+    expect(controller.getSnapshot().presentation?.status).toBe("canceled")
+
+    const eventAfterCancel = presenceEvent({
+      requestId: "presence-after-cancel",
+      sourceEventId: "source-after-cancel",
+    })
+    expect(controller.consumePresence(eventAfterCancel)).toBe(true)
+    const activePresence = controller.getSnapshot().presence
+    expect(
+      controller.acknowledgePresenceCaptionVisible({
+        requestId: eventAfterCancel.requestId,
+        presentationGeneration: activePresence?.presentationGeneration ?? 0,
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
+    expect(gateway.speech[0]?.text).toBe(eventAfterCancel.utterance)
+  })
+
+  it("keeps an existing Luna caption active when Terra activation is unavailable", async () => {
+    const { controller, gateway } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+    const failedStart = event("started", { requestId: "failed-support" })
+    expect(controller.consume(failedStart)).toBe(true)
+    expect(
+      controller.consume(
+        event("terminal", { requestId: "failed-support", status: "completed" }),
+      ),
+    ).toBe(true)
+    const failedKey = sourceKeyFromCommitNarrationEvent(failedStart)
+    const existingPresence = presenceEvent({
+      requestId: "presence-before-failure",
+      sourceEventId: "source-before-failure",
+    })
+    expect(controller.consumePresence(existingPresence)).toBe(true)
+
+    await expect(controller.activatePresentation(failedKey)).resolves.toBe(true)
+    expect(controller.getSnapshot()).toMatchObject({
+      presentation: {
+        status: "unavailable",
+        errorCode: "NARRATION-PRESENTATION-EMPTY",
+      },
+      presence: { requestId: existingPresence.requestId },
+    })
+    const activePresence = controller.getSnapshot().presence
+    expect(
+      controller.acknowledgePresenceCaptionVisible({
+        requestId: existingPresence.requestId,
+        presentationGeneration: activePresence?.presentationGeneration ?? 0,
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
+    expect(gateway.speech[0]?.text).toBe(existingPresence.utterance)
   })
 
   it("keeps a timed-out or muted Luna caption without replaying speech", async () => {

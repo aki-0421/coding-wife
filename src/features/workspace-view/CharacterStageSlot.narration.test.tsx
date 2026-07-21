@@ -224,6 +224,42 @@ describe("CharacterStageSlot narration", () => {
     )
   })
 
+  it("keeps Luna visible when an unavailable Terra activation leaves a tombstone", async () => {
+    const gateway = new DemoNarrationGateway()
+    const controller = new NarrationController(gateway)
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 2,
+      locale: "ja",
+    })
+    expect(controller.consume(started)).toBe(true)
+    expect(
+      controller.consume({
+        ...started,
+        kind: "terminal",
+        status: "completed",
+        errorCode: null,
+      }),
+    ).toBe(true)
+    expect(controller.consumePresence(presence)).toBe(true)
+    await controller.activatePresentation(
+      sourceKeyFromCommitNarrationEvent(started),
+    )
+    expect(controller.getSnapshot().presentation?.status).toBe("unavailable")
+    const renderer: CharacterStageRenderer = (props) => (
+      <div data-state={props.state} data-testid="renderer" />
+    )
+
+    renderStage({ controller, gateway, renderer })
+
+    expect(screen.getByText(presence.utterance)).toBeVisible()
+    expect(screen.getByTestId("renderer")).toHaveAttribute(
+      "data-state",
+      "waiting_for_user",
+    )
+  })
+
   it("projects presentation state without owning the shared caption", async () => {
     const gateway = new DemoNarrationGateway()
     const controller = new NarrationController(gateway)

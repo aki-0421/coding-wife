@@ -124,18 +124,20 @@ describe("narration contracts", () => {
 
   it("accepts exact Luna presence events and trigger-specific semantic cues", () => {
     const cases = [
-      ["decision_wait", "asking"],
-      ["recoverable_failure", "warning"],
-      ["terminal_failure", "error"],
-      ["long_milestone", "working"],
-      ["commit_ready", "success"],
-      ["turn_completed", "neutral"],
+      ["decision_wait", "asking", "high"],
+      ["recoverable_failure", "warning", "high"],
+      ["terminal_failure", "error", "high"],
+      ["long_milestone", "working", "low"],
+      ["commit_ready", "success", "normal"],
+      ["turn_completed", "neutral", "normal"],
     ] as const
 
-    for (const [trigger, cue] of cases) {
+    for (const [trigger, cue, priority] of cases) {
       expect(
-        parsePresenceDirectionEvent(presenceDirection({ trigger, cue })),
-      ).toMatchObject({ trigger, cue, model: "gpt-5.6-luna" })
+        parsePresenceDirectionEvent(
+          presenceDirection({ trigger, cue, priority }),
+        ),
+      ).toMatchObject({ trigger, cue, priority, model: "gpt-5.6-luna" })
     }
   })
 
@@ -146,6 +148,22 @@ describe("narration contracts", () => {
       presenceDirection({ workspaceGeneration: 0 }),
       presenceDirection({ trigger: "routine_tool" }),
       presenceDirection({ trigger: "decision_wait", cue: "success" }),
+      presenceDirection({ trigger: "decision_wait", priority: "normal" }),
+      presenceDirection({
+        trigger: "recoverable_failure",
+        cue: "warning",
+        priority: "normal",
+      }),
+      presenceDirection({
+        trigger: "long_milestone",
+        cue: "working",
+        priority: "high",
+      }),
+      presenceDirection({
+        trigger: "turn_completed",
+        cue: "neutral",
+        priority: "low",
+      }),
       presenceDirection({ modelRole: "main_session" }),
       presenceDirection({ model: "gpt-5.6" }),
       presenceDirection({ locale: "fr" }),
