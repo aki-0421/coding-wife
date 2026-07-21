@@ -122,17 +122,10 @@ const en = {
   runtimeErrorTitle: "The local runtime could not be reached",
   retry: "Retry",
   diagnostics: "Diagnostics",
-  timelineTitle: "Activity",
-  timelineDescription: "Structured, redacted workspace events",
   lastSummaryTitle: "Last session summary",
   lastSummaryDescription:
     "Restored from this workspace's redacted local history.",
-  persistedBadge: "Persisted locally",
-  ephemeralHistoryBadge: "Demo memory",
   historyUnavailable: "History requires recovery",
-  timelineEmptyTitle: "No persisted activity yet",
-  timelineEmptyBody:
-    "Start the first turn or inspect project diagnostics before continuing.",
   timelineEvent: {
     kind: {
       thread: "Codex session",
@@ -148,7 +141,7 @@ const en = {
       request_resolved: "Response recorded",
       error: "Action failed",
       completion: "Turn completed",
-      status: "Activity",
+      status: "Status",
     },
     history: "Recorded event",
     running: "Running",
@@ -608,17 +601,10 @@ const ja: typeof en = {
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   retry: "再試行",
   diagnostics: "診断",
-  timelineTitle: "アクティビティ",
-  timelineDescription: "構造化・秘匿化されたワークスペースイベント",
   lastSummaryTitle: "前回セッションの要約",
   lastSummaryDescription:
     "このワークスペースの秘匿化済みローカル履歴から復元しました。",
-  persistedBadge: "ローカルに永続化済み",
-  ephemeralHistoryBadge: "デモ用メモリ",
   historyUnavailable: "履歴の復旧が必要です",
-  timelineEmptyTitle: "永続化されたアクティビティはまだありません",
-  timelineEmptyBody:
-    "最初のターンを開始するか、続行前にプロジェクト診断を確認してください。",
   timelineEvent: {
     kind: {
       thread: "Codexセッション",
@@ -634,7 +620,7 @@ const ja: typeof en = {
       request_resolved: "回答を記録",
       error: "操作に失敗",
       completion: "ターン完了",
-      status: "アクティビティ",
+      status: "状態",
     },
     history: "記録済みイベント",
     running: "実行中",

@@ -33,7 +33,7 @@ status: "Approved"
 | 対象 | 内容 |
 |---|---|
 | Main session | Codex App Serverのinitialize、thread、turn、stop、reconnect、resume |
-| Timeline | user/assistant text、tool開始・結果、file変更、test、Git、support、decision、errorの正規化event |
+| Timeline | user/assistant text、plan/tool、file/diff、decision/approval、error、completionの会話向けprojection |
 | Composer | multiline指示、attachment、project context参照、reasoning effort、send、stop |
 | Decision | 選択肢、自由入力、保留、中断、明示承認、理由・影響・可逆性 |
 | Character | default/custom Live2D、状態表現、mute、visible caption、static/text fallback |
@@ -103,7 +103,9 @@ status: "Approved"
 
 ### Chat timeline
 
-eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさず`未対応のイベント`、event ID、診断linkにする。
+eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさずChatでは描画せずに診断へ隔離する。
+
+Chatは保存済みeventの監査一覧ではなく、現在の会話を理解して次の操作を決めるためのprojectionとする。tab名が領域名を担うため、本文上端に`Activity / アクティビティ`見出しと説明を置かない。Chatへ表示するのは`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`、`completion`だけとし、raw `history`、generic `status`、`thread` / `turn` lifecycle、`request_resolved`は永続化しても描画しない。成功した同一tool itemの開始・終了更新はstable IDで一行へ統合し、異なるtool itemはcompact rowのまま保持する。検証結果は対応するtool/error、Git evidenceはCommit tab、support状態は専用controller surfaceを正本にする。
 
 | event kind | compact表示 | 展開表示 | 主要action |
 |---|---|---|---|
@@ -111,21 +113,22 @@ eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共�
 | Assistant commentary | plain text、phase label | related work unit / support result | copy |
 | Tool activity | icon、approved verb、target basename、running/result | sanitized args summary、duration、exit category、detail ref | expand、copy summary |
 | File change | create/update/delete、relative path、line count | redacted patch summary、ownership | Commit tabで確認 |
-| Verification | test/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
-| Git event | observation/new commit/commit unavailable、short SHA | before/after HEAD、commit count、verification/risk相関 | Commit tabで確認 |
-| Support work | agent label、bounded task、status | request、result summary、verification、ownership | related eventへ移動 |
-| Decision | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
+| Verification | tool rowのtest/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
+| Decision / Approval | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
+| Completion | conversation終端を示す細い境界行、時刻 | 非該当 | 非該当 |
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
 
-timeline rendererは全eventを同じcardへ描画せず、`message`、`operation`、`boundary`、`intervention`の四つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / history / status / errorは一行summaryと展開可能なsanitized detail、thread / turn / completion / request resolvedは細い状態境界、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
+timeline rendererは表示対象を`message`、`operation`、`boundary`、`intervention`の四つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / errorは一行summaryと展開可能なsanitized detail、completionは細い状態境界、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
+
+表示対象eventが0件でlast summaryと回復alertもない場合、timeline領域にはplaceholder、見出し、説明、icon、枠、CTAを一切描画しない。composerは通常位置に残し、初期focusもcomposerとする。
 
 commit explainerのrequest、status、delta、result、failureはChat timelineとmain conversationへ追加しない。これらはapp-owned explanation controller、S-003の状態表示、Character captionだけで扱う。
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
-timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted locally / ローカルに永続化済み`とする。browser demoは`Demo memory / デモ用メモリ`をbadgeで示す。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、browser demoはheaderの`Preview only / プレビューのみ`、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
 
 ### Composer
 
@@ -213,7 +216,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | workspace切替確認 | old workspaceにactive/pending turnがあり別workspaceを選択/Send | new selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけ | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
-| demo memory | browser previewの決定的memory adapter | `Demo memory` badgeを表示し、Codex/Git/履歴の汎用noticeと`Persisted locally`は表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
+| demo memory | browser previewの決定的memory adapter | Chatには履歴badgeを表示せず、headerの`Preview only`とDiagnosticsでruntime/durabilityを識別する | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
 
@@ -315,7 +318,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 ## アクセシビリティ
 
-- focus順はheaderのrepository / workspace / branch copy control、header tabs、timeline heading、new updates、events、decision、composer controls、Character controlsとする。
+- focus順はheaderのrepository / workspace / branch copy control、header tabs、new updates、events、decision、composer controls、Character controlsとする。空のChat timelineはfocus targetを追加しない。
 - timelineは`role=feed`相当を使う場合も追加eventごとに読み上げず、完了、decision、errorだけをlive regionへ要約する。
 - tool groupのcollapsed/expanded、running/failed、file create/update/deleteをtextでも示す。
 - decisionはheading、説明、option、Other、Hold/Interrupt/Approve、submitのDOM順とし、keyboardだけで完結する。
@@ -364,7 +367,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Approved |
-| レビュー日 | 2026-07-18 |
+| レビュー日 | 2026-07-21 |
 
 - [x] front matter、title、filenameの`S-002`が一致する。
 - [x] `status: Approved`である。

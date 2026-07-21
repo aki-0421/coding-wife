@@ -313,16 +313,18 @@ Sidebarは255.04px幅と49.5px itemに合わせた固定4段階を使う。**Sid
 
 timeline は一続きの transcript とし、すべての event を同じ card template へ押し込まない。情報の役割ごとに次の四つの密度を使い分ける。
 
+Chat は永続化eventの監査一覧ではなく会話向けprojectionとする。tab名が領域名を担うため本文上端へ`Activity / アクティビティ`見出し、説明、正常時の永続化badgeを置かない。`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`、`completion`だけを表示し、raw `history`、generic `status`、`thread` / `turn`、`request_resolved`は保存されていてもChatへ描画しない。表示対象が0件ならplaceholder、icon、枠、CTAを一切描画しない。
+
 - **Conversation:** User instruction は送信単位が一目で分かる restrained warm tint の block、Assistant commentary は Continuous Desk 上の plain prose とする。名前と時刻は小さな header にまとめ、完了 badge、丸い avatar、tool chip、常設 copy action を本文と競合させない。長文を途中で切らず、copy は本文末尾の控えめな action から到達できる。
-- **Operation:** tool、file、diff、plan、history、status、error は 30px 前後の一行 summary を正本とする。kind icon、承認済み verb、target または結果、terminal state、時刻を一行に置き、sanitized detail は native `details` / `summary` で展開する。completed は初期状態で閉じ、running、failed、interrupted は開く。error code と failed result は閉じても summary から隠さない。
-- **Boundary:** thread、turn、completion、request resolved は conversation と operation の区切りを示す細い status row とし、card、background fill、copy action を持たせない。
+- **Operation:** tool、file、diff、plan、error は 30px 前後の一行 summary を正本とする。kind icon、承認済み verb、target または結果、terminal state、時刻を一行に置き、sanitized detail は native `details` / `summary` で展開する。completed は初期状態で閉じ、running、failed、interrupted は開く。error code と failed result は閉じても summary から隠さない。
+- **Boundary:** completion だけをconversationの終端を示す細いstatus rowとし、card、background fill、copy actionを持たせない。
 - **Intervention:** decision と approval だけは強い outline surface を使い、質問、根拠、影響、可逆性、選択肢を一面で保持する。前後に重複した generic event header を置かない。
 
 同じ視覚的役割は `message`、`operation`、`boundary`、`intervention` の semantic layout としてDOMにも残す。keyboard利用者は operation summary を Enter / Space で開閉でき、展開状態は chevron と `open` semanticsの両方で伝える。hoverだけで情報や操作を出現させず、24×24px以上のhit target、focus-visible、statusのtext parityを維持する。
 
 ### Navigation
 
-Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、先頭に24px owner avatar、続いてbranch icon付きtitleと`owner/repo`の二行を置き、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。breadcrumb rowはGitHub originがある時にowner avatar、`owner/repo`、workspace名を順に置く。repository、workspace名、branchはellipsis可能なtext buttonとし、hover / focus-visibleでselected-rowを示し、activationで省略前のexact valueをclipboardへcopyする。これらのvalue controlへtooltipまたはnative `title`を付けない。copy icon、成功check icon、その予約領域は表示せず、copy結果はbuttonのinline contentと幅を変えないaccessible statusだけで通知する。offline時はpersistent bannerを正本とし、breadcrumb rowへoffline icon、text、placeholderを表示しない。3点workspace actionはheaderへ置かず、Archiveはsidebar rowからだけ開始する。sidebarとheaderは同じavatar sourceを使い、GitHub originがない時またはavatar取得失敗時はapp markではなくneutral repository fallbackを使う。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と character 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
+Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、先頭に24px owner avatar、続いてbranch icon付きtitleと`owner/repo`の二行を置き、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。breadcrumb rowはGitHub originがある時にowner avatar、`owner/repo`、workspace名を順に置く。repository、workspace名、branchはellipsis可能なtext buttonとし、hover / focus-visibleでselected-rowを示し、activationで省略前のexact valueをclipboardへcopyする。これらのvalue controlへtooltipまたはnative `title`を付けない。copy icon、成功check icon、その予約領域は表示せず、copy結果はbuttonのinline contentと幅を変えないaccessible statusだけで通知する。offline時はpersistent bannerを正本とし、breadcrumb rowへoffline icon、text、placeholderを表示しない。3点workspace actionはheaderへ置かず、Archiveはsidebar rowからだけ開始する。sidebarとheaderは同じavatar sourceを使い、GitHub originがない時またはavatar取得失敗時はapp markではなくneutral repository fallbackを使う。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合もChatへ永続化statusを追加せず、character状態、timeline、composer、Send、muteを隠さない。
 
 ### Commit Evidence
 

@@ -364,10 +364,6 @@
   .timeline-content {
     padding-top: var(--spacing-sm);
   }
-
-  .timeline-status-region {
-    gap: var(--spacing-xxs);
-  }
 }
 
 .timeline-operation > summary::-webkit-details-marker {

@@ -51,7 +51,7 @@ import { cn } from "@/lib/utils"
 interface TimelineProps {
   readonly compactStatus?: ReactNode
   readonly copy: WorkspaceCopy
-  readonly events: readonly WorkspaceTimelineItem[]
+  readonly events: readonly ChatTimelineEvent[]
   readonly history: WorkspaceAdapterState["history"]
   readonly interruptAvailable: boolean
   readonly lastSummary: WorkspaceAdapterState["lastSummary"]
@@ -72,6 +72,47 @@ type PendingTimelineEvent = Extract<
   CodexSemanticTimelineEvent,
   { readonly kind: "decision" | "approval" }
 >
+
+export type ChatTimelineEvent = Extract<
+  WorkspaceTimelineItem,
+  {
+    readonly kind:
+      | "user"
+      | "assistant"
+      | "plan"
+      | "tool"
+      | "file"
+      | "diff"
+      | "decision"
+      | "approval"
+      | "error"
+      | "completion"
+  }
+>
+
+export function isChatTimelineEvent(
+  event: WorkspaceTimelineItem,
+): event is ChatTimelineEvent {
+  switch (event.kind) {
+    case "user":
+    case "assistant":
+    case "plan":
+    case "tool":
+    case "file":
+    case "diff":
+    case "decision":
+    case "approval":
+    case "error":
+    case "completion":
+      return true
+    case "history":
+    case "status":
+    case "thread":
+    case "turn":
+    case "request_resolved":
+      return false
+  }
+}
 
 const otherAnswerId = "__coding_wife_other__"
 
@@ -655,22 +696,13 @@ type MessageTimelineEvent = Extract<
 type OperationTimelineEvent = Extract<
   WorkspaceTimelineItem,
   {
-    readonly kind:
-      | "history"
-      | "plan"
-      | "tool"
-      | "file"
-      | "diff"
-      | "error"
-      | "status"
+    readonly kind: "plan" | "tool" | "file" | "diff" | "error"
   }
 >
 
 type BoundaryTimelineEvent = Extract<
   WorkspaceTimelineItem,
-  {
-    readonly kind: "thread" | "turn" | "completion" | "request_resolved"
-  }
+  { readonly kind: "completion" }
 >
 
 interface FormattedEventTime {
@@ -1001,10 +1033,6 @@ function BoundaryEventRow({
       <span className="shrink-0 text-text-secondary">
         {eventLabel(copy, event)}
       </span>
-      {event.kind === "completion" ||
-      event.kind === "request_resolved" ? null : (
-        <EventState copy={copy} event={event} />
-      )}
       <span aria-hidden="true" className="h-px min-w-sm flex-1 bg-divider/70" />
       <EventTime occurredAt={event.occurredAt} time={time} />
     </article>
@@ -1022,7 +1050,7 @@ function TimelineEventRow({
 }: {
   readonly activePendingIds: ReadonlySet<string>
   readonly copy: WorkspaceCopy
-  readonly event: WorkspaceTimelineItem
+  readonly event: ChatTimelineEvent
   readonly interruptAvailable: boolean
   readonly onAnswerApproval: TimelineProps["onAnswerApproval"]
   readonly onAnswerDecision: TimelineProps["onAnswerDecision"]
@@ -1035,18 +1063,13 @@ function TimelineEventRow({
     case "user":
     case "assistant":
       return <MessageEventRow copy={copy} event={event} time={time} />
-    case "history":
     case "plan":
     case "tool":
     case "file":
     case "diff":
     case "error":
-    case "status":
       return <OperationEventRow copy={copy} event={event} time={time} />
-    case "thread":
-    case "turn":
     case "completion":
-    case "request_resolved":
       return <BoundaryEventRow copy={copy} event={event} time={time} />
     case "decision":
     case "approval":
@@ -1087,7 +1110,6 @@ export function Timeline({
   onOpenDiagnostics,
 }: TimelineProps) {
   const summaryHeadingId = useId()
-  const historyEphemeral = history.mode === "ephemeral"
   const historyUnavailable =
     history.mode === "read_only" || history.mode === "recovery_required"
   const activePendingIds = useMemo(
@@ -1096,30 +1118,14 @@ export function Timeline({
   )
   return (
     <div className="timeline-content flex min-h-full flex-col pb-[162px] pt-lg">
-      <div className="mb-md flex items-center justify-between gap-md px-xs">
-        <div className="min-w-0">
-          <h2 className="m-0 text-balance text-headline text-text-strong">
-            {copy.timelineTitle}
-          </h2>
-          <p className="sr-only">{copy.timelineDescription}</p>
-        </div>
+      {compactStatus ? (
         <div
-          className="timeline-status-region flex shrink-0 flex-col items-end gap-xs"
-          data-chat-status-region=""
+          className="mb-md hidden justify-end px-xs max-[840px]:flex"
+          data-chat-compact-status-region=""
         >
-          <Badge
-            data-persistence-status=""
-            variant={history.mode === "ready" ? "success" : "outline"}
-          >
-            {historyEphemeral
-              ? copy.ephemeralHistoryBadge
-              : historyUnavailable
-                ? copy.historyUnavailable
-                : copy.persistedBadge}
-          </Badge>
           {compactStatus}
         </div>
-      </div>
+      ) : null}
 
       {lastSummary !== null &&
       lastSummary !== undefined &&
@@ -1195,20 +1201,7 @@ export function Timeline({
             />
           ))}
         </div>
-      ) : (
-        <div className="flex min-h-36 flex-col items-center justify-center gap-xs rounded-control border border-dashed border-divider px-xl text-center">
-          <MessageSquareTextIcon
-            aria-hidden="true"
-            className="size-5 text-muted-foreground"
-          />
-          <h3 className="m-0 text-title text-text-strong">
-            {copy.timelineEmptyTitle}
-          </h3>
-          <p className="m-0 max-w-[52ch] text-caption text-muted-foreground">
-            {copy.timelineEmptyBody}
-          </p>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }

@@ -59,7 +59,7 @@ describe("final acceptance evidence harness", () => {
     recorder.pass({
       scenarioId: "web_demo_boundary",
       assertions: [
-        "Browser history is labeled Demo memory.",
+        "Chat omits normal durability badges while the header labels browser execution Preview only.",
         "Native diagnostics are unavailable rather than reported Ready.",
       ],
     })

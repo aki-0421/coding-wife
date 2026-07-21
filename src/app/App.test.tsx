@@ -172,7 +172,7 @@ describe("App workspace shell", () => {
     )
 
     expect(await screen.findByText("Preview only")).toBeVisible()
-    expect(screen.getByText("Demo memory")).toBeVisible()
+    expect(screen.queryByText("Demo memory")).not.toBeInTheDocument()
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
     expect(
       document.querySelector('[data-character-stage-default="app-live2d"]'),
