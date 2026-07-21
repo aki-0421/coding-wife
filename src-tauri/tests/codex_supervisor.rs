@@ -2039,9 +2039,13 @@ async fn native_rui_round_trips_option_label_and_bounded_other_answer() {
 }
 
 #[tokio::test]
-async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
+async fn exact_result_and_fallback_are_accepted_while_invalid_output_interrupts() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
-    for (mode, interrupted) in [("decision_fallback", false), ("decision_invalid", true)] {
+    for (mode, interrupted) in [
+        ("decision_result", false),
+        ("decision_fallback", false),
+        ("decision_invalid", true),
+    ] {
         let fixture = FixtureEnvironment::new(mode);
         let supervisor = test_supervisor();
         supervisor.start_signal_loop();
@@ -2072,13 +2076,10 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
             .await
             .expect("turn");
         tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(
-            read_state(&fixture.state)
-                .await
-                .contains("interrupt_received"),
-            interrupted,
-            "{mode}"
-        );
+        let state = read_state(&fixture.state).await;
+        assert!(state.contains("decision_output_schema_ok"), "{mode}");
+        assert!(!state.contains("decision_output_schema_invalid"), "{mode}");
+        assert_eq!(state.contains("interrupt_received"), interrupted, "{mode}");
         supervisor.shutdown().await;
         drop(fixture);
     }

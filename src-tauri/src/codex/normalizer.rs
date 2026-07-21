@@ -852,9 +852,9 @@ mod tests {
                     "id": "raw-item-id",
                     "type": "agentMessage",
                     "text": concat!(
-                        r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /"#,
+                        r#"{"schemaVersion":1,"response":{"kind":"result","message":"Bearer abc /"#,
                         "Users/alice/project/src/main.rs",
-                        r#"","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}"#
+                        r#"","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}}"#
                     )
                 }}),
                 100,
@@ -922,7 +922,7 @@ mod tests {
                     "id": "commentary-structured",
                     "type": "agentMessage",
                     "phase": "commentary",
-                    "text": r#"{"schemaVersion":1,"kind":"result","message":"READMEと設定を確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                    "text": r#"{"schemaVersion":1,"response":{"kind":"result","message":"READMEと設定を確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}}"#
                 }}),
                 300,
             )
@@ -943,7 +943,7 @@ mod tests {
                 "item/agentMessage/delta",
                 &json!({
                     "itemId": "raw-item-id",
-                    "delta": r#"{"allowFreeform":true,"kind":"result""#
+                    "delta": r#"{"schemaVersion":1,"response":{"allowFreeform":true,"kind":"result""#
                 }),
                 100,
             )
@@ -956,7 +956,7 @@ mod tests {
                 &json!({"item": {
                     "id": "raw-item-id",
                     "type": "agentMessage",
-                    "text": r#"{"schemaVersion":1,"kind":"result","message":"リポジトリを確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                    "text": r#"{"schemaVersion":1,"response":{"kind":"result","message":"リポジトリを確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}}"#
                 }}),
                 200,
             )

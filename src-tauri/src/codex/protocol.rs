@@ -436,11 +436,10 @@ pub(crate) fn parse_support_thread_policy_response(
 }
 
 pub fn decision_output_schema() -> Value {
-    json!({
+    let result = json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
-            "schemaVersion",
             "kind",
             "message",
             "decisionId",
@@ -450,80 +449,108 @@ pub fn decision_output_schema() -> Value {
             "allowFreeform"
         ],
         "properties": {
-            "schemaVersion": {"type": "integer", "enum": [1]},
-            "kind": {"type": "string", "enum": ["result", "decision_request"]},
-            "message": {"type": "string"},
-            "decisionId": {
-                "type": ["string", "null"],
-                "description": "Use null for result; provide a stable ID for decision_request."
-            },
-            "question": {
-                "type": ["string", "null"],
-                "description": "Use null for result; provide the user question for decision_request."
-            },
+            "kind": {"type": "string", "const": "result"},
+            "message": {"type": "string", "minLength": 1, "maxLength": 65_536},
+            "decisionId": {"type": "null"},
+            "question": {"type": "null"},
+            "options": {"type": "null"},
+            "context": {"type": "null"},
+            "allowFreeform": {"type": ["boolean", "null"]}
+        }
+    });
+    let decision_request = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "kind",
+            "message",
+            "decisionId",
+            "question",
+            "options",
+            "context",
+            "allowFreeform"
+        ],
+        "properties": {
+            "kind": {"type": "string", "const": "decision_request"},
+            "message": {"type": "string", "minLength": 1, "maxLength": 4_096},
+            "decisionId": {"type": "string", "minLength": 1, "maxLength": 128},
+            "question": {"type": "string", "minLength": 1, "maxLength": 4_096},
             "options": {
-                "type": ["array", "null"],
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["id", "label", "description"],
                     "properties": {
-                        "id": {"type": "string"},
-                        "label": {"type": "string"},
-                        "description": {"type": "string"}
+                        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "label": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "description": {"type": "string", "maxLength": 1_024}
                     }
                 }
             },
             "context": {
-                "anyOf": [
-                    {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                            "schemaVersion",
-                            "category",
-                            "targetKind",
-                            "targetAlias",
-                            "effect",
-                            "scope",
-                            "risk",
-                            "reversibility",
-                            "recommendation",
-                            "evidence",
-                            "uncertainty"
-                        ],
-                        "properties": {
-                            "schemaVersion": {"type": "integer", "enum": [1]},
-                            "category": {"type": "string", "enum": ["user_decision"]},
-                            "targetKind": {"type": "string", "enum": ["active_turn"]},
-                            "targetAlias": {"type": "string", "enum": ["active_turn"]},
-                            "effect": {"type": "string", "enum": ["continue_turn"]},
-                            "scope": {"type": "string", "enum": ["turn"]},
-                            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
-                            "reversibility": {
-                                "type": "string",
-                                "enum": [
-                                    "reversible",
-                                    "partially_reversible",
-                                    "not_reversible",
-                                    "unknown"
-                                ]
-                            },
-                            "recommendation": {"type": ["string", "null"]},
-                            "evidence": {"type": "array", "items": {"type": "string"}},
-                            "uncertainty": {
-                                "type": "string",
-                                "enum": ["none", "limited_context", "unknown_effects"]
-                            }
-                        }
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "schemaVersion",
+                    "category",
+                    "targetKind",
+                    "targetAlias",
+                    "effect",
+                    "scope",
+                    "risk",
+                    "reversibility",
+                    "recommendation",
+                    "evidence",
+                    "uncertainty"
+                ],
+                "properties": {
+                    "schemaVersion": {"type": "integer", "const": 1},
+                    "category": {"type": "string", "const": "user_decision"},
+                    "targetKind": {"type": "string", "const": "active_turn"},
+                    "targetAlias": {"type": "string", "const": "active_turn"},
+                    "effect": {"type": "string", "const": "continue_turn"},
+                    "scope": {"type": "string", "const": "turn"},
+                    "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "reversibility": {
+                        "type": "string",
+                        "enum": [
+                            "reversible",
+                            "partially_reversible",
+                            "not_reversible",
+                            "unknown"
+                        ]
                     },
-                    {"type": "null"}
-                ]
+                    "recommendation": {
+                        "anyOf": [
+                            {"type": "string", "minLength": 1, "maxLength": 128},
+                            {"type": "null"}
+                        ]
+                    },
+                    "evidence": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 512}
+                    },
+                    "uncertainty": {
+                        "type": "string",
+                        "enum": ["none", "limited_context", "unknown_effects"]
+                    }
+                }
             },
-            "allowFreeform": {
-                "type": ["boolean", "null"],
-                "description": "Use null for result and false for decision_request."
-            }
+            "allowFreeform": {"type": "boolean", "const": false}
+        }
+    });
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "response"],
+        "properties": {
+            "schemaVersion": {"type": "integer", "const": 1},
+            "response": {"anyOf": [result, decision_request]}
         }
     })
 }
@@ -1029,23 +1056,93 @@ mod tests {
     }
 
     #[test]
-    fn decision_output_schema_uses_a_structured_outputs_root_object() {
+    fn decision_output_schema_matches_the_strict_parser_shape_and_bounds() {
         let schema = decision_output_schema();
         assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["schemaVersion", "response"]));
+        assert_eq!(
+            schema["properties"].as_object().map(|value| value.len()),
+            Some(2)
+        );
+        assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
         assert!(schema.get("oneOf").is_none());
+
+        let branches = schema["properties"]["response"]["anyOf"]
+            .as_array()
+            .expect("response union");
+        assert_eq!(branches.len(), 2);
+        let result = branches
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["const"] == "result")
+            .expect("result branch");
+        let decision = branches
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["const"] == "decision_request")
+            .expect("decision branch");
+
+        assert_eq!(result["additionalProperties"], false);
         assert_eq!(
-            schema["properties"]["kind"]["enum"],
-            json!(["result", "decision_request"])
+            result["required"],
+            json!([
+                "kind",
+                "message",
+                "decisionId",
+                "question",
+                "options",
+                "context",
+                "allowFreeform"
+            ])
         );
+        assert_eq!(result["properties"]["message"]["minLength"], 1);
+        assert_eq!(result["properties"]["message"]["maxLength"], 65_536);
+        for field in ["decisionId", "question", "options", "context"] {
+            assert_eq!(result["properties"][field]["type"], "null", "{field}");
+        }
         assert_eq!(
-            schema["properties"]["decisionId"]["type"],
-            json!(["string", "null"])
+            result["properties"]["allowFreeform"]["type"],
+            json!(["boolean", "null"])
         );
+
+        assert_eq!(decision["additionalProperties"], false);
+        assert_eq!(decision["required"], result["required"]);
+        assert_eq!(decision["properties"]["message"]["maxLength"], 4_096);
+        assert_eq!(decision["properties"]["decisionId"]["minLength"], 1);
+        assert_eq!(decision["properties"]["decisionId"]["maxLength"], 128);
+        assert_eq!(decision["properties"]["question"]["maxLength"], 4_096);
+        let options = &decision["properties"]["options"];
+        assert_eq!(options["minItems"], 2);
+        assert_eq!(options["maxItems"], 3);
+        assert_eq!(options["items"]["additionalProperties"], false);
         assert_eq!(
-            schema["properties"]["allowFreeform"]["description"],
-            "Use null for result and false for decision_request."
+            options["items"]["required"],
+            json!(["id", "label", "description"])
         );
-        assert_eq!(schema["required"].as_array().map(Vec::len), Some(8));
+        assert_eq!(options["items"]["properties"]["id"]["maxLength"], 128);
+        assert_eq!(options["items"]["properties"]["label"]["maxLength"], 256);
+        assert_eq!(
+            options["items"]["properties"]["description"]["maxLength"],
+            1_024
+        );
+        let context = &decision["properties"]["context"];
+        assert_eq!(context["additionalProperties"], false);
+        assert_eq!(context["required"].as_array().map(Vec::len), Some(11));
+        assert_eq!(context["properties"]["schemaVersion"]["const"], 1);
+        assert_eq!(context["properties"]["category"]["const"], "user_decision");
+        assert_eq!(context["properties"]["targetKind"]["const"], "active_turn");
+        assert_eq!(context["properties"]["targetAlias"]["const"], "active_turn");
+        assert_eq!(context["properties"]["effect"]["const"], "continue_turn");
+        assert_eq!(context["properties"]["scope"]["const"], "turn");
+        assert_eq!(
+            context["properties"]["recommendation"]["anyOf"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(context["properties"]["evidence"]["minItems"], 1);
+        assert_eq!(context["properties"]["evidence"]["maxItems"], 8);
+        assert_eq!(context["properties"]["evidence"]["items"]["maxLength"], 512);
+        assert_eq!(decision["properties"]["allowFreeform"]["const"], false);
     }
 
     #[test]

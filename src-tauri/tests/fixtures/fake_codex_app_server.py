@@ -122,6 +122,65 @@ def expected_runtime_workspace_roots(cwd_value):
         return None
 
 
+def validate_decision_output_schema(schema):
+    try:
+        if not (
+            isinstance(schema, dict)
+            and schema.get("type") == "object"
+            and schema.get("additionalProperties") is False
+            and schema.get("required") == ["schemaVersion", "response"]
+            and set(schema.get("properties", {})) == {"schemaVersion", "response"}
+            and schema["properties"]["schemaVersion"].get("const") == 1
+            and "oneOf" not in schema
+        ):
+            return False
+        branches = schema["properties"]["response"].get("anyOf")
+        if not isinstance(branches, list) or len(branches) != 2:
+            return False
+        by_kind = {
+            branch.get("properties", {}).get("kind", {}).get("const"): branch
+            for branch in branches
+        }
+        result_branch = by_kind.get("result")
+        decision_branch = by_kind.get("decision_request")
+        if not (
+            isinstance(result_branch, dict)
+            and result_branch.get("additionalProperties") is False
+            and result_branch["properties"]["message"].get("minLength") == 1
+            and result_branch["properties"]["message"].get("maxLength") == 65536
+            and all(
+                result_branch["properties"][field].get("type") == "null"
+                for field in ("decisionId", "question", "options", "context")
+            )
+        ):
+            return False
+        options = decision_branch["properties"]["options"]
+        option_item = options["items"]
+        context = decision_branch["properties"]["context"]
+        evidence = context["properties"]["evidence"]
+        return (
+            decision_branch.get("additionalProperties") is False
+            and decision_branch["properties"]["message"].get("maxLength") == 4096
+            and decision_branch["properties"]["decisionId"].get("maxLength") == 128
+            and decision_branch["properties"]["question"].get("maxLength") == 4096
+            and options.get("minItems") == 2
+            and options.get("maxItems") == 3
+            and option_item.get("additionalProperties") is False
+            and option_item["properties"]["id"].get("maxLength") == 128
+            and option_item["properties"]["label"].get("maxLength") == 256
+            and option_item["properties"]["description"].get("maxLength") == 1024
+            and context.get("additionalProperties") is False
+            and context["properties"]["schemaVersion"].get("const") == 1
+            and context["properties"]["effect"].get("const") == "continue_turn"
+            and evidence.get("minItems") == 1
+            and evidence.get("maxItems") == 8
+            and evidence["items"].get("maxLength") == 512
+            and decision_branch["properties"]["allowFreeform"].get("const") is False
+        )
+    except (KeyError, TypeError):
+        return False
+
+
 def validate_attachment_inputs(inputs, expected_image, expected_notes):
     try:
         if not isinstance(inputs, list):
@@ -691,6 +750,9 @@ def main():
                     and collaboration_mode.get("settings", {}).get("model")
                     == "gpt-5.6-sol"
                 )
+                decision_schema_valid = validate_decision_output_schema(
+                    params.get("outputSchema")
+                )
                 valid = (
                     params.get("model") == "gpt-5.6-sol"
                     and "effort" in params
@@ -701,6 +763,12 @@ def main():
                     and "collaborationMode" in params
                     and collaboration_valid
                     and "multiAgentMode" not in params
+                    and decision_schema_valid
+                )
+                record(
+                    "decision_output_schema_ok"
+                    if decision_schema_valid
+                    else "decision_output_schema_invalid"
                 )
                 sandbox_policy = params.get("sandboxPolicy")
                 workspace_roots_valid = (
@@ -1031,6 +1099,7 @@ def main():
                     }
                 )
             if MODE in (
+                "decision_result",
                 "decision_fallback",
                 "decision_invalid",
                 "decision_continuation_crash",
@@ -1040,38 +1109,56 @@ def main():
                     json.dumps(
                         {
                             "schemaVersion": 1,
-                            "kind": "decision_request",
-                            "message": "A choice is required",
-                            "decisionId": "fixture-decision",
-                            "question": "Choose a safe option",
-                            "options": [
-                                {
-                                    "id": "continue",
-                                    "label": "Continue",
-                                    "description": "Continue safely",
-                                },
-                                {
-                                    "id": "stop",
-                                    "label": "Stop",
-                                    "description": "Stop this turn",
-                                },
-                            ],
-                            "context": {
-                                "schemaVersion": 1,
-                                "category": "user_decision",
-                                "targetKind": "active_turn",
-                                "targetAlias": "active_turn",
-                                "effect": "continue_turn",
-                                "scope": "turn",
-                                "risk": "medium",
-                                "reversibility": "unknown",
-                                "recommendation": "continue",
-                                "evidence": [
-                                    "The continuation is bounded to the active turn."
-                                ],
-                                "uncertainty": "limited_context",
+                            "response": {
+                                "kind": "result",
+                                "message": "The bounded work is complete.",
+                                "decisionId": None,
+                                "question": None,
+                                "options": None,
+                                "context": None,
+                                "allowFreeform": None,
                             },
-                            "allowFreeform": False,
+                        },
+                        separators=(",", ":"),
+                    )
+                    if MODE == "decision_result"
+                    else json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "response": {
+                                "kind": "decision_request",
+                                "message": "A choice is required",
+                                "decisionId": "fixture-decision",
+                                "question": "Choose a safe option",
+                                "options": [
+                                    {
+                                        "id": "continue",
+                                        "label": "Continue",
+                                        "description": "Continue safely",
+                                    },
+                                    {
+                                        "id": "stop",
+                                        "label": "Stop",
+                                        "description": "Stop this turn",
+                                    },
+                                ],
+                                "context": {
+                                    "schemaVersion": 1,
+                                    "category": "user_decision",
+                                    "targetKind": "active_turn",
+                                    "targetAlias": "active_turn",
+                                    "effect": "continue_turn",
+                                    "scope": "turn",
+                                    "risk": "medium",
+                                    "reversibility": "unknown",
+                                    "recommendation": "continue",
+                                    "evidence": [
+                                        "The continuation is bounded to the active turn."
+                                    ],
+                                    "uncertainty": "limited_context",
+                                },
+                                "allowFreeform": False,
+                            },
                         },
                         separators=(",", ":"),
                     )
