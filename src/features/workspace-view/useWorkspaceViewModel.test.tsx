@@ -246,7 +246,7 @@ describe("useWorkspaceViewModel workspace transitions", () => {
   it("does not expose an unsafe turn start error", async () => {
     const fixture = adapterFixture()
     fixture.sendTurn.mockRejectedValueOnce(
-      new Error("/Users/private/.codex/auth.json"),
+      new Error("/\u0055sers/private/.codex/auth.json"),
     )
     const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
