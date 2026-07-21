@@ -1,7 +1,7 @@
 ---
 title: "GIT Gitレビュー観測要件定義"
 description: "main Codexが作るcommitをnative backendがread-only観測し、commit evidence、skill監査、説明導線を提供する。"
-updated: 2026-07-19
+updated: 2026-07-21
 read_when:
   - "Git observer、commit evidence、Commit tabを実装するとき。"
   - "commit skill注入、work unitとcommitの相関、native Git権限を検証するとき。"
@@ -15,13 +15,13 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-21 |
 
 ## 背景
 
 レビュー可能なcommitは必要だが、アプリ内のnative Git serviceがindex、object、ref、worktreeを変更すると、main coding sessionとの二重producerになり、既存変更の混入、履歴競合、crash recoveryの複雑さを生む。commit producerはversioned skillを毎turn受け取るmain Codex sessionへ一本化し、native backendはGit状態と履歴を読むobserverに限定する。
 
-Commit画面は「アプリがcheckpointを作る場所」ではない。main Codexが通常作業中に作ったcommitと、work unitの検証・判断・リスクを相関して確認するread-only evidence画面である。平易なcommit説明は、App Serverのcommit command成功とread-only SHA検証をapp側interceptorが相関した直後に、main sessionとは独立したapp-owned explanation controllerが自動生成する。
+Commit画面は「アプリがcheckpointを作る場所」ではない。main Codexが通常作業中に作ったcommitと、work unitの検証・判断・リスクを相関して確認するread-only evidence画面である。平易なcommit説明は、App Serverのcommit command成功、またはversioned `node_repl/js` commit proofとread-only SHA検証をapp側interceptorが相関した直後に、main sessionとは独立したapp-owned explanation controllerが自動生成する。
 
 ## 目的
 
@@ -87,7 +87,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | `GIT-F-079` | appはversioned main commit skillを同梱する | resource名は`coding-wife-commit-work`、path authorityは`app_bundle`、`SKILL.md`と`agents/openai.yaml`を含み、`policy.allow_implicit_invocation: false`である。repositoryとuser Codex homeへfileを作らない | Approved |
 | `GIT-F-080` | main skillを各main turnへ明示注入する | `turn/start.input`へ`type=skill`、name、bundle pathを1件含める。runtimeにskill inputが無い場合だけ同一version本文をthread developer instructionsへ注入し、二重注入しない。証明できないturnはdraftを保持して開始しない | Approved |
 | `GIT-F-081` | skill注入はidempotentかつ監査可能である | `CommitSkillInjectionV1`にskill ID/version/content digest/path authority/injection mode/workspace generation/work unit/client request IDを持ち、同じturn retryは同一digestのexact replayとなる | Approved |
-| `GIT-F-082` | main skillはcommit品質と安全境界を規定する | 適切なreview粒度、英語Conventional Commits summary、変更と意図の英語body bullets、pre-existing変更保護、verification結果報告を指示し、安全にcommitできない場合はforceせず理由を報告する | Approved |
+| `GIT-F-082` | main skillはcommit品質と安全境界を規定する | 適切なreview粒度、英語Conventional Commits summary、変更と意図の英語body bullets、pre-existing変更保護、verification結果報告を指示する。`node_repl/js`内でcommitする場合はcommit直前のfull HEADまたは`unborn`と検証後のfull commit SHAをexact versioned response `_meta`として返し、安全にcommitまたはmarker確定できない場合はforceせず理由を報告する | Approved |
 | `GIT-F-083` | terminal work unitはcommitの有無を正確に扱う | commit 0件でもwork unit terminalを成功/失敗状態に従って記録し、未commitをapp failureと断定しない。mainの「commit不能」報告があれば理由をevidenceへ相関する | Approved |
 
 ### Commit evidence画面
@@ -105,7 +105,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 |
 |---|---|---|---|
-| `GIT-F-090` | verified commitはapp側から自動説明を起動する | App ServerのGit commit commandがsuccess terminalになり、`GIT-F-075`のobserverが新しいSHAとcommit evidence IDを検証した時だけnative trusted runtimeが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。`auto_verified_commit`はRust内部APIだけが作成でき、公開`commit_explanation_request`は同triggerをfail closedで拒否する。commit選択、Commit tab表示、SHA未検証結果では起動せず、main conversationへrequestを送らない | Approved |
+| `GIT-F-090` | verified commitはapp側から自動説明を起動する | App ServerのGit commit commandがsuccess terminal、または`node_repl/js` completed resultがexact versioned commit proof markerになり、`GIT-F-075`のobserverが同じworkspace repository identity・before/current HEAD・到達可能な新しいexact SHA・commit evidence IDを検証した時だけnative trusted runtimeが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。`auto_verified_commit`はRust内部APIだけが作成でき、公開`commit_explanation_request`は同triggerをfail closedで拒否する。raw JavaScript/result content、HEAD差分単独、marker欠落・不正、commit選択、Commit tab表示、SHA未検証結果では起動せず、main conversationへrequestを送らない | Approved |
 | `GIT-F-091` | supportへはredacted `CommitEvidenceV1`だけを渡す | SHAのopaque ID、sanitized subject/body、pathなしfile summary、diff統計、verification、decision、risk、locale、generationを最大64KiBで渡し、absolute/relative path、raw diff全文、secret、raw reasoningを0件にする | Approved |
 | `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offの検証済みbytesをowner-only private snapshotへ複製し、説明turnにだけ1件注入する。`SUP-F-053`のclean runtimeとcapacity gateを必須にし、wire-advertised/external-authority toolは0件とする。tool field追加またはCodex内部の`update_plan` eventではtaskをfailedにし説明を適用しない | Approved |
 | `GIT-F-093` | 説明はJA/ENのversioned schemaで生成し明示intent後にstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きでapp-owned memoryへ返す。`auto_verified_commit`では生成済みchunkをcacheするだけとし、対象commitの「詳しく教えて」または明示再表示でexact presentation intentがactiveになった後だけcharacter captionへ逐次表示する | Approved |

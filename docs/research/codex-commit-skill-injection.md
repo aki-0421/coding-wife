@@ -1,8 +1,8 @@
 ---
 title: "Codex commit skill の turn 単位注入調査"
 description: "アプリ同梱の commit SKILL.md をリポジトリへ保存せず、Codex App Server の各 turn へ明示注入する契約を整理する。"
-updated: 2026-07-18
-last_verified: 2026-07-18
+updated: 2026-07-21
+last_verified: 2026-07-21
 read_when:
   - "commit skill の同梱、版管理、turn/start 注入、診断表示を実装するとき。"
   - "Codex CLI 更新後に skill input の互換性を再検証するとき。"
@@ -20,13 +20,14 @@ skill の存在だけでは実行を保証しない。両skillの `agents/openai
 
 ## 調査方法
 
-最終確認日は 2026-07-18 である。
+最終確認日は 2026-07-21 である。
 
 | 資料・証拠 | 確認内容 | 採用理由 |
 |---|---|---|
 | OpenAI [Build skills](https://learn.chatgpt.com/docs/build-skills) | skill は `SKILL.md` と任意 resource からなり、明示・暗黙の 2 経路で起動される。Codex は選択した skill の本文を読む | skill の公式 authoring / activation 契約であるため |
 | OpenAI [Codex App Server](https://learn.chatgpt.com/docs/app-server) | `turn/start` は user input を受け、実行 CLI と一致する TypeScript / JSON schema を生成できる | rich client 統合と version-specific schema 検査の公式根拠であるため |
 | `codex-cli 0.144.5` の `codex app-server generate-ts` 出力 | `TurnStartParams.input: Array<UserInput>`、`UserInput` に `type: "skill"`、`name`、`path` が存在。`ThreadStartParams` / `ThreadResumeParams` に `developerInstructions` が存在 | 実際に同梱対象となる runtime version の wire contract を確認できるため |
+| `codex-cli 0.144.5` の `McpToolCallThreadItem` / `McpToolCallResult` 生成型と実`node_repl/js` read-only probe | itemは`server`、`tool`、`status`、`result`、`error`を持ち、resultは`content`、`structuredContent`、`_meta`を持つ。`nodeRepl.setResponseMeta`でversioned objectを`_meta`へ返せる | raw JavaScriptや表示用content textを解釈せず、commit intentをtyped resultへ明示する経路を確認できるため |
 
 生成 schema は `/tmp` にだけ出力し、repository へコピーしていない。CLI 更新時は同じコマンドで再生成し、型名だけでなく union variant と required field を再確認する。
 
@@ -67,11 +68,12 @@ skill は main Codex に次を要求する。
 - body は変更内容と意図を英語 bullet で記録する。
 - subject、body、各bulletは物理改行で分離し、2文字のliteral `\n`をcommit messageへ保存しない。message fileまたは複数の`-m`引数でmessageを構築し、commit前後に実bytesを検査する。
 - commit後は`git log -1 --format=%B`でmessageを読み戻し、subject、空行、body bulletが別lineであること、およびliteral `\n`が存在しないことを確認できた時だけ成功として報告する。
+- `node_repl/js`内でcommitする場合は、commit直前のfull HEAD（初回commitなら`unborn`）を保持し、message検査後のfull commit SHAとともに`nodeRepl.setResponseMeta({codingWifeGitCommitProof:{schemaVersion:1,operation:"git_commit",beforeHead,commitSha}})`でexact markerを返す。markerを確定できなければcommit成功として報告しない。
 - session 開始前から存在する利用者変更を保護し、無関係な変更を stage / commit しない。
 - 実行した verification と結果を報告する。
 - 安全に commit できない場合は理由を報告し、force、履歴書き換え、native service への代行要求を行わない。
 
-native Git backend はこの方針の実行者ではない。HEAD、status、commit metadata、diff、work-unit evidence の read-only observer に限定する。
+native Git backend はこの方針の実行者ではない。HEAD、status、commit metadata、diff、work-unit evidence の read-only observer に限定する。interceptorは`node_repl/js`のraw JavaScript、arguments、content textからGit intentやSHAを推測せず、exact markerもworkspace generation・thread・turn・item・repository identity・native before/current HEAD・reachabilityを満たす時だけopaque proofへ昇格する。
 
 ## commit説明skillの境界
 

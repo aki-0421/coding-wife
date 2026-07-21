@@ -1,7 +1,7 @@
 ---
 title: "Codex commit interceptor・support controller実装ガイド"
-description: "main App Serverのcommit commandを非公開で相関し、検証済みcommitだけをisolated support説明へ渡すruntime境界を記録する。"
-updated: 2026-07-18
+description: "main App Serverのcommit commandまたはversioned node_repl proofを非公開で相関し、検証済みcommitだけをisolated support説明へ渡すruntime境界を記録する。"
+updated: 2026-07-21
 read_when:
   - "main Codex turnとGit観測をwork unit単位で接続するとき。"
   - "commit説明controller、support queue、cancel、cache、native eventを変更するとき。"
@@ -16,13 +16,13 @@ read_when:
 ## trusted commit相関
 
 1. main work unit の `turn/start` wire request より前に、App Server adapter が `observe_git_repository` を `work_unit_started` reason で呼び、before observation を保存する。この観測失敗は main turn を拒否せず、当該 work unit の commit 相関と自動説明だけを無効化する。
-2. raw `item/started` が同じ workspace generation・thread・turn の `commandExecution` であり、bounded command classifier が Git commit 候補と判定した時だけ、native interceptor がその時点の full HEAD を一時取得する。command、output、cwd、候補 HEAD は history、main event、WebViewへ保存・公開しない。
-3. 対応する raw `item/completed` が `source=agent`、`status=completed`、`exitCode=0` をすべて満たす時だけ、native read-only observer が現在の full HEAD を取得する。started 時点と異なる、到達可能な exact SHA だけを、workspace generation・work unit・thread・turn・item に束縛した非公開の `TrustedCommitProof` にする。substring一致、output中の短縮SHA、失敗、decline、exit code欠落、HEAD不変から proof を作らない。
+2. raw `item/started` が同じ workspace generation・thread・turn の次のいずれかの時だけ、native interceptor がその時点のworkspace repository identityとfull HEADを一時取得する。(a) `commandExecution`かつ`source=agent`でbounded command classifierがGit commit候補と判定したもの、(b) `mcpToolCall`かつexact `server=node_repl`・`tool=js`・`status=inProgress`のもの。command、JavaScript、arguments、result content、cwd、候補HEADはhistory、main event、WebViewへ保存・公開しない。
+3. 対応する raw `item/completed` は、command経路では`source=agent`・`status=completed`・`exitCode=0`をすべて満たす時だけ、`node_repl/js`経路では`status=completed`・`error=null`・resultの`_meta.codingWifeGitCommitProof`が追加keyなしのexact `{schemaVersion:1, operation:"git_commit", beforeHead, commitSha}`を満たす時だけcompletion候補にする。markerの`beforeHead`はcandidate開始時HEAD、`commitSha`はnative current HEADとfull exact一致させ、同じrepository identity、workspace generation、work unit、thread、turn、item、reachability、forward rangeを再検証できた新SHAだけを非公開の`TrustedCommitProof`にする。raw JavaScript、arguments、content/structuredContent text、substring、output中の短縮SHA、marker単独、失敗、errorあり、exit code欠落、HEAD不変からproofを作らない。
 4. completed / failed / interrupted / canceled の全 terminal event で internal terminal observer を1回呼ぶ。before HEAD が after HEAD の ancestor である場合だけ、その範囲の新規 commit を最大100件まで列挙し、同じ terminal call に渡された opaque proof の exact SHA と一致する commit だけを `main_codex` と相関する。proofのない新規 commitをmain Codex作成と推測しない。
 5. proof済み commit ごとに evidence を生成し、`git.commit_evidence.recorded` として workspace history へ追記する。work unit correlation と terminal observation も別 event として保存する。terminal eventの重複、並べ替え、stale generation、process restartは同じ proof を再適用しない。
 6. exact SHA と commit evidence ID の組が検証できた時だけ、app-owned controller が `auto_verified_commit` を1件 enqueueする。commit選択、Commit tab表示、raw command result、SHA proofだけでは自動起動しない。
 
-raw command classifierは自動説明の権限根拠ではない。候補抽出に失敗した時は自動説明を省略し、文字列一致だけをproducer proofへ昇格しない。Git executableを起動してcommitを代行するfallbackも持たない。
+raw command classifierと`node_repl/js` markerは、いずれも単独では自動説明の権限根拠ではない。candidate抽出、marker、workspace/repository identity、before/current HEAD、reachabilityのいずれかを確定できない時は自動説明を省略し、文字列一致またはHEAD差分だけをproducer proofへ昇格しない。Git executableを起動してcommitを代行するfallbackも持たない。
 
 ## app-owned controller
 
@@ -39,7 +39,7 @@ support入力はnative Git serviceが作成し、path / secret scannerと64 KiB�
 ### Rust ownership
 
 1. Tauri setupは`GitReviewService`と`CommitExplanationController`を作り、両方を所有するnative-only main work-unit runtimeを`CodexSupervisor`へ1回だけattachする。
-2. runtimeはmain turn wire送信前にbefore observationを取り、同じleaseにcommand candidate / proof / terminalを束縛する。terminal observerが返した`TrustedVerifiedCommit`ごとにredacted `CommitEvidenceV1`を作り、active scopeのlocaleでinternal enqueueする。
+2. runtimeはmain turn wire送信前にbefore observationを取り、同じleaseにcommandまたは`node_repl/js` candidate / proof / terminalを束縛する。terminal observerが返した`TrustedVerifiedCommit`ごとにredacted `CommitEvidenceV1`を作り、active scopeのlocaleでinternal enqueueする。
 3. `CommitExplanationController::enqueue_verified_commit`だけが`trigger=auto_verified_commit`を受理する。公開`commit_explanation_request`は`user_request` / `user_retry`以外を`CODEX-SUPPORT-AUTO-TRIGGER-FORBIDDEN`で拒否する。
 4. controllerのactive scopeはworkspace ID、workspace generation、localeである。scope変更は別workspaceを含む旧queued / running taskをterminal cancelし、late completionをcache / eventへ適用しない。
 
@@ -68,8 +68,8 @@ adapter/controller/cache/narration chunkはmemory-onlyである。App restart後
 
 ## 検証マトリクス
 
-- 正常系: started candidate → successful completed → exact new reachable SHA → terminal evidenceの順で、`auto_verified_commit`を1件だけenqueueする。
-- command失敗、exit code欠落、HEAD不変、forged output SHA、substringだけ、completed-before-started、duplicate notificationではenqueueしない。
+- 正常系: commandまたはexact `node_repl/js` started candidate → successful completed → exact new reachable SHA → terminal evidenceの順で、`auto_verified_commit`を1件だけenqueueする。
+- command失敗、exit code欠落、`node_repl/js`以外、MCP failed/error、marker欠落・未知key・before/SHA不一致、HEAD不変、forged output/content SHA、raw JavaScript substringだけ、completed-before-started、duplicate notificationではenqueueしない。
 - unrelated external commitが同じwork unit中に存在しても、opaque proofのexact SHA以外を`main_codex`にしない。
 - stale workspace generation、wrong thread / turn / item、terminal重複、App Server restart後のlate eventはstateを変更しない。
 - queueはsingle active、上限超過はsafe unavailable、cancel / timeoutはsupport interruptを実行し、late resultを適用しない。

@@ -1,7 +1,7 @@
 ---
 title: Git review runtime 実装・検証ガイド
 description: main Codex が作成した commit を read-only で観測し、commit evidence、lazy diff、app-owned 説明導線を安全に変更・検証するためのガイド。
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - Git observer、work unit correlation、commit evidence を実装または変更するとき。
   - Commit tab の list、detail、filter、lazy diff、4 gate を接続または検証するとき。
@@ -24,11 +24,12 @@ commit、stage、restore、revert、compare checkpoint、branch/ref 更新、che
 ## データフロー
 
 1. work unit 開始時、App Server adapter が `observe_git_repository` を `work_unit_started` reason で呼び、before observation を保存する。
-2. main Codex が commit command を完了する。runtime は commit command を代行しない。
-3. terminal event で `observe_terminal_work_unit` を呼ぶ。before HEAD が after HEAD の ancestor である場合だけ、その範囲の新規 commit を最大100件まで列挙する。
-4. commit ごとに evidence を生成し、`git.commit_evidence.recorded` として workspace history へ追記する。work unit correlation と terminal observation も別 event として保存する。
-5. Commit tab は list → detail → 選択 file diff の順で読み、diff bytes を先読みしない。
-6. 説明が必要な時だけ `prepare_commit_explanation_evidence` で pathless `CommitEvidenceV1` を作り、app-owned `CommitExplanationController` へ渡す。
+2. main Codex がcommit commandを完了するか、`node_repl/js` resultへversioned commit proof markerを返す。runtimeはcommandを代行せず、raw JavaScript・arguments・result contentを解釈しない。
+3. commandまたはmarkerのintentを、candidate開始時のworkspace repository identity・before HEADとcompletion時のcurrent HEAD・reachabilityへexact照合してopaque proofにする。marker単独またはHEAD差分単独はproofにしない。
+4. terminal event で `observe_terminal_work_unit` を呼ぶ。before HEAD が after HEAD の ancestor である場合だけ、その範囲の新規 commit を最大100件まで列挙する。
+5. opaque proofのexact SHAと一致するcommitごとにevidenceを生成し、`git.commit_evidence.recorded`としてworkspace historyへ追記する。proofのないcommitは`external_uncorrelated`のままにする。work unit correlationとterminal observationも別eventとして保存する。
+6. Commit tab は list → detail → 選択 file diff の順で読み、diff bytes を先読みしない。
+7. 説明が必要な時だけ `prepare_commit_explanation_evidence` で pathless `CommitEvidenceV1` を作り、app-owned `CommitExplanationController` へ渡す。
 
 履歴にない既存 commit も閲覧できるが、producer は `external_uncorrelated`、4 gate は `unknown` として扱う。推測で work unit へ結び付けない。
 

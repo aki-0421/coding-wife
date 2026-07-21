@@ -39,7 +39,7 @@ read_when:
 | Main model | `gpt-5.6-sol`固定、supported reasoning effort |
 | Composer | multiline prompt、file/image、read-only context、Command+Enter、stop |
 | Timeline | plan、assistant、tool、file、error、decision eventの会話向けprojection |
-| Commit interception | normalized Git commit command terminal、read-only SHA verification、app-owned explanation handoff |
+| Commit interception | normalized Git commit command、versioned `node_repl/js` commit proof、read-only SHA verification、app-owned explanation handoff |
 | Human input | structured decision、approval、Other、hold、interrupt、fallback |
 | Recovery | auth/model/process failure、reconnect、no automatic replay |
 
@@ -60,7 +60,7 @@ read_when:
 | ローカル利用者 | turnを開始・判断・停止する本人 | prompt、attachment、context、effort、decision、approval、interrupt | validation error時はdraftを保持し、送信しない |
 | Codex main session | active workspaceで実装する唯一のcoding identity | App Server契約内のturnと通常subagent | unavailable capabilityは呼ばずfallbackまたはblocked表示にする |
 | Rust supervisor | child processとprotocolの信頼境界 | executable検証、stdio、event normalization、interrupt、shutdown | malformed frame、crash、timeoutを構造化errorへ変換する |
-| App-side commit interceptor | normalized command terminalとread-only Git observationを相関する | success commit commandの新しいSHAを検証し、app-owned explanation controllerへ通知する | SHA未検証、duplicate、stale generationを起動条件にせず、main conversationへ通知を注入しない |
+| App-side commit interceptor | normalized command terminalまたはexact `node_repl/js` commit proofとread-only Git observationを相関する | success commit intentの新しいSHAを検証し、app-owned explanation controllerへ通知する | SHA未検証、raw JavaScript・result text推測、duplicate、stale generationを起動条件にせず、main conversationへ通知を注入しない |
 
 ## 機能要件
 
@@ -117,8 +117,8 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-077` | appはmain sessionのGit commit command成功をtyped eventとして検出する | App Serverのnormalized command terminalがGit commit、exit success、active workspace generation一致の時だけcandidateを1件作り、assistant text、一般tool success、失敗command、raw文字列の部分一致では作らない | Approved | 非該当 |
-| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | command前後のHEADと到達可能commitを相関し、新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`auto_verified_commit`をapp-owned explanation controllerへ渡す。0件、複数件、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
+| `CODE-F-077` | appはmain sessionのGit commit成功意図をtyped eventとして検出する | App Serverのnormalized `commandExecution`がGit commitかつexit success、または`mcpToolCall`がexact `server=node_repl`・`tool=js`・completed・errorなしで、result `_meta.codingWifeGitCommitProof`がexact `{schemaVersion:1, operation:"git_commit", beforeHead, commitSha}`の時だけcandidate completionを作る。`node_repl/js`はstarted時にcandidateを固定し、raw JavaScript、arguments、content text、assistant text、一般tool success、失敗tool、文字列の部分一致からcommitを推測しない | Approved | 非該当 |
+| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | active workspace generation・workspace repository identity・thread・turn・itemとcandidate開始時HEADを固定し、command completionではnative current HEAD、`node_repl/js`ではmarkerのfull `beforeHead` / `commitSha`とnative before/current HEADをexact照合する。到達可能な新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`auto_verified_commit`をapp-owned explanation controllerへ渡す。marker欠落・未知key、0件、複数件、HEAD不変、external/stale、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
 | `CODE-F-079` | commit説明runtimeをmain conversationから完全に分離する | `auto_verified_commit`受理後のsupport root作成、status、delta、terminal、retryがmain thread/turn/subagent/event/command countを変えず、main sessionへ説明request/result/failureを1件も送らない。同じworkspace generation・commit evidence IDはidempotentに1件へ集約する | Approved | 非該当 |
 
 ## 入力項目要件
