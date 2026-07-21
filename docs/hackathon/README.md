@@ -41,16 +41,17 @@ source_of_truth: https://openai.devpost.com/rules
 
 ## Coding Wife の現在地
 
-Developer Tools track、public repository、MIT license、third-party notices は準備済みです。現行productは`gpt-5.6-sol`のmain coding session、`gpt-5.6-luna`のpresence director、`gpt-5.6-terra`のcommit explainerを分離しています。Public release v0.1.5 は古い preview で、この3モデル連携や最新UIを証明できないため、現行提出物として扱いません。
+Developer Tools track、public repository、MIT license、third-party notices は準備済みです。現行productは`gpt-5.6-sol`のmain coding session、`gpt-5.6-luna`のpresence director、`gpt-5.6-terra`のcommit explainerを分離しています。Product source は commit [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) に固定し、同commitを指す[macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開・匿名検証済みです。主要build threadの`/feedback` uploadも成功し、Session IDはprivate evidenceへ保存済みです。
+
+Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewです。現行3モデル連携や最新UIの審査には、上記immutable sourceとjudge prereleaseだけを使います。受理済み2:45 masterはlocalで完成していますが、Public YouTube公開とDevpost formのsubmitはまだ完了していません。
 
 締切までの critical path は次の順です。
 
-1. 審査対象 source commit / tag を freeze する。
-2. frozen source と一致する現行 prebuilt release を no-rebuild testing path として公開する。
-3. 3分未満・音声付きの demo video を早く upload し、YouTube の visibility を Public にする。
-4. 主要 build thread の Session ID を取得し、source・release・video の内容を一致させる。
-5. Devpost form を submit し、My Projects で緑の **Submitted** 表示を確認する。
-6. video、repo、release、submission URL を logged-out / fresh environment で確認する。
+1. 受理済みの3分未満・音声付きmasterをYouTubeへuploadし、visibilityを**Public**にする。
+2. 処理済みvideoをlogged-out状態で再生し、映像・音声・字幕・URLを確認する。
+3. Devpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを入力する。
+4. Devpost formをsubmitし、My Projectsで緑の**Submitted**表示を確認する。
+5. video、repository、release、submission URLをlogged-out / fresh environmentで最終確認する。
 
 hosted demo、judge account、screenshots は一律必須ではありません。選んだ testing path または logged-in form が要求する場合だけ用意します。
 
@@ -70,6 +71,7 @@ hosted demo、judge account、screenshots は一律必須ではありません�
 | [10-final-submission-checklist.md](./10-final-submission-checklist.md) | 提出前の最終チェックリスト |
 | [11-sources-and-open-questions.md](./11-sources-and-open-questions.md) | 情報源、矛盾、未確認事項、保守的な判断 |
 | [12-final-submission-materials.md](./12-final-submission-materials.md) | Devpost入力、審査手順、動画台本、証跡台帳、匿名スモークの最終提出パッケージ |
+| [13-final-video-production-runbook.md](./13-final-video-production-runbook.md) | 受理済み2:45 master、字幕、スクリーンショット、media/privacy検査、公開handoffの記録 |
 
 ## 情報の扱い
 

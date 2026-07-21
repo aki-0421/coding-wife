@@ -184,13 +184,14 @@ Support:
 | Developer Tools track | 完了 | submission の track として使用 |
 | Public repository | 完了 | public URL を提出 |
 | MIT license / third-party notices | 完了 | repository に含まれる |
-| Public release v0.1.5 | 古い preview | 現行3モデル連携・最新UIの証拠には使わない |
-| Frozen source commit / tag | 未完了 | 審査対象を固定する |
-| Current no-rebuild release | 未完了 | frozen source と一致する artifact を公開する |
+| Public release v0.1.5 | 古い preview | repository default `develop`と同様に、現行3モデル連携・最新UIの証拠には使わない |
+| Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
+| Current no-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)、SHA-256、匿名3 asset検証、39/39 release suite、install/first-launch smokeがPASS |
+| Accepted local video master | 完了 | 165.000秒、H.264/AAC、英語音声・焼き込み字幕、全4,950 frame privacy検査、4 screenshotsを受理済み |
 | Public YouTube video | 未完了 | 3分未満・音声付き・Public で公開する |
-| Primary Codex Session ID | 未取得 | 主要 build thread から取得する |
+| Primary Codex Session ID | 入力待ち | primary thread照合・private evidence保存・`/feedback` upload成功。値はpublic docsへ書かずDevpostへ転記する |
 | Devpost form / Submitted state | 未完了 | form を submit し、My Projects で確認する |
-| Anonymous smoke | 未完了 | video・repo・release・提出URLをログアウト状態で確認する |
+| Anonymous smoke | 一部完了 | repository・immutable source・release・downloaded DMGはPASS。video・提出URLは公開後に確認する |
 
 hosted demo、judge account、screenshots は、選んだ testing path または logged-in submission form が要求する場合だけ用意します。絶対パス、API key、個人情報を提出資料へ記載しません。
 
@@ -206,8 +207,8 @@ hosted demo、judge account、screenshots は、選んだ testing path または
 - [x] video requirement
 - [x] judging dates / test access requirement
 - [ ] logged-in submission form の正確な fields
-- [ ] 実際に提出する Session ID
-- [ ] frozen source と current no-rebuild release の対応
+- [x] 実際に提出するSession IDをprivate evidenceでprimary threadと照合し、`/feedback` upload成功を確認
+- [x] frozen product sourceとcurrent no-rebuild releaseのtag target、assets、SHA-256対応
 - [ ] Devpost の Submitted 表示
 
 ## 9. 2026-07-22 public re-verification record
@@ -216,4 +217,6 @@ hosted demo、judge account、screenshots は、選んだ testing path または
 - OpenAI Build Week page は 2026-07-22 JST に取得可能で、同 page の judging 表示 Jul 22–Aug 7 を再確認した。
 - deadline、4 tracks、public / private repository、3分未満の public video、Codex / GPT-5.6、Session ID、submission freeze、Developer Tools の no-rebuild testing path を再確認した。
 - Update 45402 は、OpenAI API / API credits が必須ではないこと、動画の早期 upload、fresh testing、`/feedback`、My Projects の Submitted 表示確認を明記している。
-- logged-in submission form の fields・文字数と、実際の video URL・Session ID・Devpost submission URL は提出者の操作が必要なため未確認。
+- Product source `44d9aab779b9a66ed3f02d0016af061a71ba79c3`、public judge prerelease、DMG SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`を匿名環境で再検証した。downloaded artifactのsidecar・manifest・bytes・canonical verifierとinstall/first-launch smokeはPASS。
+- Primary Session IDはprivate evidenceで照合し、`/feedback` upload成功を確認した。値はpublic documentへ記載しない。
+- logged-in submission formのfields・文字数、実際のvideo URL、Devpost submission URLは未確認。Session IDのDevpost fieldへの転記も未完了。

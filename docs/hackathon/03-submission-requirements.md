@@ -197,24 +197,24 @@ Coding Wife は Developer Tools track の desktop app なので、installation i
 | Track | 完了 | Developer Tools |
 | Public repository | 完了 | 公開 repository URL を提出する |
 | License / notices | 完了 | MIT license と第三者 notice を維持する |
-| Public release v0.1.5 | 参考用のみ | 古い preview のため、現行3モデル連携や最新UIの証拠には使わない |
-| Frozen source | 未完了 | 審査対象 commit / tag を固定する |
-| No-rebuild release | 未完了 | frozen source から現行 prebuilt artifact を公開し、fresh environment で確認する |
+| Public release v0.1.5 | 参考用のみ | default `develop`と同様に古いpreviewのため、現行3モデル連携や最新UIの証拠には使わない |
+| Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
+| No-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開し、匿名download・SHA/manifest/byte一致・canonical verify・install/first-launch smokeを確認済み。release suiteは39/39 PASS |
 | Public YouTube video | 未完了 | 3分未満、音声付き、Public で upload する |
-| Primary Session ID | 未取得 | 主要 build thread から取得する |
+| Primary Session ID | 入力待ち | 主要build threadを照合し、`/feedback` upload成功とSession IDをprivate evidenceへ保存済み。Devpost fieldへ入力する |
 | Devpost submission | 未完了 | form 入力後、draft ではなく Submitted を確認する |
-| Anonymous smoke test | 未完了 | video・repo・release・提出URLをログアウト状態で確認する |
+| Anonymous smoke test | 一部完了 | repository・immutable source・release・3 assetsはPASS。video・提出URLは公開後に確認する |
 
 ## 11. 提出当日の順序
 
 提出直前の Update 45402 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
 
-1. frozen source を確定し、それと一致する no-rebuild release を公開する。
-2. 動画を早めに YouTube へ upload し、処理完了後に Public URL を取得する。
-3. project、release、repo、動画を fresh / logged-out 状態で確認する。
-4. 主要 thread の Session ID と最終 commit を照合する。
-5. Devpost form を submit し、My Projects で緑の **Submitted** 表示を確認する。
-6. deadline 前に、公開リンクと repository permissions をもう一度確認する。
+1. 完成済み動画を早めにYouTubeへuploadし、処理完了後にPublic URLを取得する。
+2. 動画をlogged-out状態で再生し、3分未満・音声・字幕・privacyを確認する。
+3. Devpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを入力する。
+4. Devpost formをsubmitし、My Projectsで緑の**Submitted**表示を確認する。
+5. project、release、repository、動画をfresh / logged-out状態で確認する。
+6. deadline前に、公開リンクとrepository permissionsをもう一度確認する。
 
 ## 12. 提出直後
 

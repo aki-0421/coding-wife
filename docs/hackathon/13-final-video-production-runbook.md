@@ -749,6 +749,23 @@ The causal demo begins at seed commit `baeb62d` and ends at real Sol commit `d68
 
 Final inspection decoded all 4,950 frames, found zero black intervals, and produced 4,950/4,950 full-frame OCR evidence rows with zero high-risk findings. Exact-key scanning, non-media-box scanning, metadata scanning, full-resolution screenshot review, shot-boundary review, contact-sheet review, and full decode all passed. The four selected screenshots are 1920×1080 and each passed an independent OCR privacy scan.
 
+## 14. Public judge handoff state
+
+The local media record above is frozen. The current external handoff is:
+
+| Item | State |
+|---|---|
+| Public source branch | https://github.com/aki-0421/coding-wife/tree/hackathon-submission-baseline |
+| Immutable product source | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
+| No-rebuild judge release | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22 |
+| Judge DMG | `Coding-Wife.dmg`; 22,433,345 bytes; SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
+| Release verification | Release suite 39/39 PASS; anonymous three-asset download, sidecar, manifest, byte identity, canonical DMG verification, install copy, ten-second production launch, and graceful shutdown PASS |
+| Primary Codex evidence | Representative thread verified privately; `/feedback` upload succeeded without logs or recorded authentication material; Session ID is ready for private Devpost entry |
+| Public YouTube URL | `PENDING` |
+| Devpost URL and Submitted confirmation | `PENDING` |
+
+The judge release targets macOS 14+ on Apple Silicon, is ad-hoc signed, and is not notarized. Its release notes provide a bounded per-app Gatekeeper **Open Anyway** path. Repository default `develop` and the normal `v0.1.5` release are older previews; use the immutable product source and judge prerelease above. This publication state does not change the accepted Terra claim: the video shows one bounded request and one bounded retry failing closed with zero tool and write authority, not a generated explanation.
+
 ## Official sources reverified on 2026-07-22 JST
 
 - https://openai.devpost.com/rules

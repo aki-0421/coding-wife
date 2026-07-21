@@ -34,31 +34,32 @@ last_verified: 2026-07-22 JST
 
 ## 2. Source freezeとcurrent release — 最優先
 
-- [ ] Root README、hackathon docs、実装、動画台本のmodel role・UI名・操作を一致させる
-- [ ] `git status --short` で意図しない変更がないことを確認する
-- [ ] 最終source commitをpushし、公開repositoryから取得できることを確認する
-- [ ] Frozen source SHAを記録する
-- [ ] Frozen sourceから**現行full-flowを含むmacOS 14+ Apple Silicon release**を作る
-- [ ] Release artifactのSHA-256を計算し、download後のSHA-256と一致させる
-- [ ] Release notesへmacOS full-flow scope、Windows/Linux preview scope、TTS macOS-only、署名・notarization・既知制約を書く
-- [ ] macOS 14+ Apple Siliconのfresh installでSol → Luna → newly verified main-session commit → silent Terra background generation → Commit changes → explicit explanation presentationを確認する
-- [ ] Current macOS Apple Silicon judge release URLとSHA-256を最終提出資料へ記録する
+- [x] Root README、hackathon docs、実装、動画台本のmodel role・UI名・操作を一致させる
+- [x] Product source commitをpushし、公開repositoryからHTTP 200で取得できることを確認する
+- [x] Frozen product source SHAを`44d9aab779b9a66ed3f02d0016af061a71ba79c3`として記録する
+- [x] Frozen product sourceとexact matchする**macOS 14+ Apple Silicon judge prerelease**を公開する
+- [x] `Coding-Wife.dmg`のSHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`を公開し、匿名download後のsidecar・manifest・bytes・canonical verificationと一致させる
+- [x] Release fault-injection / packaging suite 39/39を通す
+- [x] Downloaded DMGのinstall copy、10秒production launch、graceful shutdown smokeを通す
+- [x] Release notesへmacOS scope、Codex/model prerequisites、Terra fail-closed、ad-hoc signing、not notarized、bounded Gatekeeper手順、既知制約を書く
+- [x] Current macOS Apple Silicon judge release URLとSHA-256を最終提出資料へ記録する
 
-`v0.1.5`だけで提出を閉じないでください。Developer Toolsはjudgeがゼロからrebuildせず試せるpathを必要とするため、現行macOS 14+ Apple Silicon full-flow releaseがsource-only説明より優先です。Windows/Linux previewをfull three-model judge pathの代替にしません。
+現行no-rebuild pathは[Build Week judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)です。Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewであり、現行3モデル連携の証拠には使いません。Install/first-launch smokeはartifactの起動可能性を証明しますが、fresh installでの3モデルruntime成功までを主張しません。Terraはprovider対応時のvalidated explanationと、非対応時のtyped unavailable / zero-tool / zero-write fail-closedの両方を正しい結果として扱います。
 
 ## 3. 3分未満のデモ動画
 
-- [ ] [08-demo-video-plan.md](./08-demo-video-plan.md) の現行2:50 scriptで収録する
-- [ ] 実native appとdisposable repositoryを使う
-- [ ] Solがmain taskを実行する場面を見せる
-- [ ] 少なくとも2回、eligible completed main messageごとのLuna captionとLive2D expression/motionを見せる
-- [ ] macOS-only TTSを見せる場合、設定済みにしてkey画面は録画しない
-- [ ] GitHub-style **Commit changes**でcommit、file、`+/-`、diffを見せる
-- [ ] このfresh-commit demoでは、newly verified main-session commitのreachable verification後にTerraがsilent background startすることを説明する
-- [ ] このfresh-commit demoで**Explain changes**を押し、cached resultのpresentationまたは同じrunning jobへのjoinを見せる。今回のpathでは最初のTerra handoffとして説明しない
-- [ ] Codexをどう使って構築したかとhuman decisionsを音声で具体的に説明する
-- [ ] English audioが明瞭で、最終尺が**3:00未満**である
-- [ ] key、token、email、notification、personal path、private URLが映っていない
+- [x] [13-final-video-production-runbook.md](./13-final-video-production-runbook.md) の受理済み2:45 scriptで収録する
+- [x] 実native Tauri app、real WKWebView / IPC / Rust backend、authenticated Codex runtime、disposable repositoryを使う
+- [x] Solがmain taskを実行し、real commitと3件のpassing testを作る場面を見せる
+- [x] 2回、eligible completed main messageごとのLuna captionとLive2D expression/motionを見せる
+- [x] GitHub-style **Commit changes**で同じreal commit、file、`+/-`、diffを見せる
+- [x] **Explain changes**から同じverified commitへのbounded Terra `user_request`と1回の`user_retry`を見せ、provider rejectionをtyped unavailable / zero-tool / zero-writeとして正確に説明する
+- [x] Codexをどう使って構築したかとhuman decisionsを英語音声で具体的に説明する
+- [x] English audioは−16.05 LUFS / −4.30 dBTPで、最終尺は165.000秒
+- [x] English字幕を焼き込み、matching SRTを生成する
+- [x] 4枚の1920×1080 screenshotをaccepted masterから抽出する
+- [x] 全4,950 frameのblack/privacy OCR、secret、metadata、full decode検査を通す
+- [x] key、token、email、notification、personal path、private URLが映っていない
 - [ ] YouTubeへ早めにuploadし、processing完了を待つ
 - [ ] Visibilityは安全側で**Public**にする
 - [ ] ログアウト状態で映像・音声・URLを確認する
@@ -68,13 +69,12 @@ last_verified: 2026-07-22 JST
 
 ## 4. Codex Session ID
 
-- [ ] Majority of core functionalityを作ったprimary threadを特定する
-- [ ] そのthreadでまず `/feedback` を実行する
-- [ ] `/feedback` がIDを表示しない場合は、同じthreadで `/status` を実行してSession IDを確認する
-- [ ] Session ID、取得日時、frozen sourceとの対応をprivate evidenceへ保存する
+- [x] Majority of core functionalityを作ったprimary threadを特定する
+- [x] そのthreadを照合し、`/feedback` uploadを成功させる
+- [x] Session ID、取得日時、frozen product sourceとの対応をprivate evidenceへ保存する
 - [ ] DevpostのSession ID fieldへ正確に入力する
 
-Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updateは`/feedback`を実行するよう案内します。一方FAQの取得手順は`/status`と書かれています。上記の順序なら両方を安全に満たせます。
+Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updateは`/feedback`を実行するよう案内します。今回のprimary threadはprivate evidenceで照合済みで、`/feedback` uploadも成功しました。ID値はpublic documentationへ書かず、Devpost formへprivate recordから転記します。
 
 ## 5. Devpost form
 
@@ -83,7 +83,7 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 - [ ] Track: **Developer Tools**
 - [ ] English descriptionを本人の声として読み直して入力する
 - [ ] Repository URL: https://github.com/aki-0421/coding-wife
-- [ ] Current macOS Apple Silicon full-flow release URLとtesting instructionsを入力する
+- [ ] Current macOS Apple Silicon judge release URL、immutable source、testing instructionsを入力する
 - [ ] Public YouTube URLを入力する
 - [ ] Primary Codex Session IDを入力する
 - [ ] Entrant情報、または全team memberとRepresentativeを確定する
@@ -100,15 +100,15 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 ログアウトした別browser profileで行います。
 
 - [ ] Devpost projectが開き、Submitted状態と全リンクを確認できる
-- [ ] Public repositoryが開き、frozen commit、README、MIT license、noticesが確認できる
-- [ ] Current macOS Apple Silicon judge releaseを認証なしでdownloadできる
-- [ ] Downloaded artifactのSHA-256が公開値と一致する
-- [ ] macOS 14+ Apple Siliconのfresh installからfull three-model flowを完了できる
+- [x] Public repositoryが開き、frozen product source、README、MIT license、noticesが確認できる
+- [x] Current macOS Apple Silicon judge releaseの3 assetsを認証なしでdownloadできる
+- [x] Downloaded artifactのSHA-256、manifest、bytes、canonical verificationが公開値・accepted local artifactと一致する
+- [x] macOS 14+ Apple Siliconでdownloaded DMGのinstall copy、10秒production launch、graceful shutdown smokeを通す
 - [ ] Videoをログアウト状態で再生でき、3分未満・English audio・privacyを確認できる
-- [ ] Session IDがprimary threadの記録と一致する
+- [x] Private evidenceのSession IDがprimary threadの記録と一致する
 - [ ] Description、video、README、current macOS releaseが同じmodel rolesとUIを説明している
 - [ ] Windows/Linux artifactはpackaging previewと表示され、production Luna/Terra parityの証拠に使われていない
-- [ ] Anonymous smokeの実施者・時刻・結果を保存する
+- [x] Repository / release匿名smokeの実施者・時刻・結果を保存する
 
 ## 7. Conditional — 未該当ならblockerにしない
 
@@ -122,9 +122,9 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 
 次がすべてYesなら提出完了です。
 
-- [ ] Current frozen macOS 14+ Apple Silicon releaseをjudgeがrebuildせず試せる
-- [ ] Videoのfresh-commit demoでSol、Luna、silent automatic Terra generation、explicit presentationの役割とworking flowが分かる
-- [ ] Root READMEだけでsetup、testing、model integration、Codex contribution、limitationsが分かる
+- [x] Current frozen macOS 14+ Apple Silicon releaseをjudgeがrebuildせずdownload・launchできる
+- [x] Videoのcausal demoでSol、Luna、Commit changes、Terra fail-closed boundaryの役割とworking flowが分かる
+- [x] Root READMEだけでsetup、testing、model integration、Codex contribution、limitationsが分かる
 - [ ] Session IDがformへ入っている
 - [ ] DevpostがSubmittedになっている
 - [ ] Logged-out smokeが通っている

@@ -11,7 +11,7 @@ last_verified: 2026-07-22 JST
 
 # Coding Wife final submission materials
 
-This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product and keeps values that can only be known after publication visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
+This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product, records completed public artifacts, and keeps the remaining YouTube and Devpost values visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
 
 Authority order:
 
@@ -28,16 +28,17 @@ Authority order:
 | Tagline | **A Live2D coding partner powered by Sol, Luna, and Terra—with reviewable commits built in.** |
 | Track | **Developer Tools** |
 | Repository | https://github.com/aki-0421/coding-wife |
+| Public source branch | https://github.com/aki-0421/coding-wife/tree/hackathon-submission-baseline |
 | Primary full three-model judge platform | macOS 14+ Apple Silicon |
 | Packaging previews | Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64; install-smoked artifacts only, without a production Luna/Terra parity claim |
-| Current macOS Apple Silicon judge release URL and SHA-256 | `PENDING` |
+| Current macOS Apple Silicon judge release URL and SHA-256 | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22 — `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
 | Demo video URL | `PENDING` |
-| Primary Codex Session ID | `PENDING` |
+| Primary Codex Session ID | **READY — verified private evidence; copy into Devpost without publishing it here** |
 | Devpost project URL | `PENDING` |
 | Entrant / team record | `PENDING` |
 | Submission state and confirmation evidence | `PENDING` |
-| Frozen source commit | `PENDING` |
-| Logged-out anonymous smoke result | `PENDING` |
+| Frozen product source commit | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
+| Logged-out anonymous smoke result | Repository, immutable source, release, all three assets, checksum, manifest, byte identity, canonical DMG verification, and install/first-launch smoke: **PASS**. YouTube and Devpost: `PENDING` |
 
 The public repository, Developer Tools track, product title, MIT license, and implemented model roles are settled facts rather than placeholders.
 
@@ -82,14 +83,14 @@ Human decisions remained explicit. We chose three isolated model roles instead o
 
 Coding Wife aims to reduce the mental work of following and reviewing a long coding session while making the experience feel more like working beside a teammate. It combines a usable coding workspace, continuous Live2D presence, and concise commit review in one local app. We have not yet run a controlled productivity study, so we claim a demonstrated workflow improvement rather than a measured time-saving percentage.
 
-The primary current full three-model judge target is macOS 14+ on Apple Silicon. It requires a compatible authenticated local Codex installation and a writable Git repository. Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64 artifacts are packaging previews with install or extraction smoke evidence; they do not carry an equivalent production Luna/Terra workflow guarantee. Optional OpenAI TTS requires a user-supplied API key and playback is macOS-only. The app does not provide cloud sync or remote collaboration. In the accepted capture environment, Terra's support event was not accepted by the provider, so that take proves the read-only fail-closed boundary but does not prove a generated commit explanation. The frozen macOS release notes must state the exact signing and notarization status.
+The primary current full three-model judge target is macOS 14+ on Apple Silicon. It requires a compatible authenticated local Codex installation and a writable Git repository. Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64 artifacts are packaging previews with install or extraction smoke evidence; they do not carry an equivalent production Luna/Terra workflow guarantee. Optional OpenAI TTS requires a user-supplied API key and playback is macOS-only. The app does not provide cloud sync or remote collaboration. In the accepted capture environment, Terra's support event was not accepted by the provider, so that take proves the read-only fail-closed boundary but does not prove a generated commit explanation. The public macOS judge prerelease is ad-hoc signed, not Developer ID signed, and not notarized; its release notes provide a bounded per-app Gatekeeper **Open Anyway** path.
 
 ## 3. Judge testing instructions
 
 ### Recommended no-rebuild path
 
-1. On a macOS 14+ Apple Silicon machine, download the **current macOS submission release** from the URL entered in Devpost and verify its published SHA-256.
-2. Follow the macOS installation and bounded Gatekeeper note attached to that release.
+1. On a macOS 14+ Apple Silicon machine, download `Coding-Wife.dmg` from the [Build Week judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22) and verify SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`.
+2. The app is ad-hoc signed and not notarized. Try opening it once; if macOS blocks it, use **System Settings > Privacy & Security > Open Anyway** for Coding Wife only. Do not disable Gatekeeper or remove quarantine globally.
 3. Launch Coding Wife and add a disposable writable Git repository.
 4. Start a workspace and send: `Add a short Usage section to README.md, verify the change, and commit it.`
 5. While Sol works, confirm that each eligible completed progress message produces a short Luna caption and a matching Live2D expression or motion. Speech is optional and should occur only if TTS was configured; unsafe excerpts are expected to remain silent.
@@ -98,7 +99,7 @@ The primary current full three-model judge target is macOS 14+ on Apple Silicon.
 
 Expected result: Sol completes real repository work, Luna keeps the character visibly responsive without gaining tools, and the Git tab shows the reviewable patch. Terra remains bounded to immutable read-only commit evidence. A compatible provider returns a validated explanation through the automatic or explicit path; an incompatible event is recorded as unavailable and fails closed with zero tool and write authority. The accepted video demonstrates the latter outcome for one `user_request` and one `user_retry` against the same verified commit.
 
-The already-public `v0.1.5` release is an **older preview**. It proves that public distribution exists, but it must not be used as evidence for the current three-model orchestration, completed-message reactions, distilled chat UI, or GitHub-style Commit changes UX. Publish and link a current frozen release before submission.
+The [Build Week judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22) is the current no-rebuild path and points exactly to product source `44d9aab779b9a66ed3f02d0016af061a71ba79c3`. Repository default `develop` and the normal `v0.1.5` release are **older previews**; they must not be used as evidence for the current three-model orchestration, completed-message reactions, distilled chat UI, or GitHub-style Commit changes UX.
 
 ### Source path
 
@@ -107,6 +108,7 @@ Use this path on macOS 14+ Apple Silicon to inspect the implementation or run th
 ```bash
 git clone https://github.com/aki-0421/coding-wife.git
 cd coding-wife
+git checkout --detach 44d9aab779b9a66ed3f02d0016af061a71ba79c3
 corepack enable
 pnpm install --frozen-lockfile
 pnpm tauri:dev
@@ -173,44 +175,47 @@ The main process, Luna support runtime, and Terra support runtime are distinct. 
 
 ## 7. Freeze and artifact record
 
-Do not treat a checksum from an earlier commit as final proof. Freeze the source first, build the current release from that exact source, then calculate and publish every immutable identity again.
+The product source was frozen before release publication. The public prerelease tag resolves exactly to that commit; its three assets were downloaded anonymously and compared with the accepted local artifacts.
 
-Current **non-final reference values** are useful only for detecting unexpected drift:
+Product-source reference values are useful for detecting unexpected drift:
 
-| Reference | Current non-final value |
+| Reference | Frozen product-source value |
 |---|---|
 | Dependency inventory JSON SHA-256 | `4deac169342e641417b28220eb8bcd7a4ddf091f7ee00c163960fd6dac93fb8e` |
 | Dependency notice Markdown SHA-256 | `57938516b9718607a3d7c165e085481e4cb3effc0ccad53586a4383eecb8a6e2` |
 | Cargo lock SHA-256 | `e566d36ea3d61d7ab5f94e72eca701fc5f33e8f2d1dd0bbbddb7d476fd060c82` |
 | Dependency inventory counts | 397 npm packages; 235 effective Cargo normal dependencies |
 
-Recalculate after the final freeze; a match does not replace release verification.
+A match does not replace the public release verification recorded below.
 
 Final external record:
 
 | Artifact | Frozen identity |
 |---|---|
-| Source commit | `PENDING` |
-| Current macOS Apple Silicon full-flow release and artifact SHA-256 | `PENDING` |
+| Frozen product source commit | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
+| Current macOS Apple Silicon judge release | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22; `Coding-Wife.dmg`; 22,433,345 bytes; SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
+| Release verification | Public prerelease and exact tag target verified anonymously; all three assets downloaded; sidecar, manifest, byte identity, canonical DMG verification, and install/ten-second launch/graceful shutdown smoke PASS; release suite 39/39 PASS |
 | Video URL, duration, visibility, and master SHA-256 | YouTube URL `PENDING`; intended visibility Public; local accepted master `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4`; 165.000 seconds; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
 | English SRT | `tmp/submission-video/captions/coding-wife-openai-build-week-2026-en.srt`; SHA-256 `c6a49d706887bacf1e34b95efbd7b4af4cc9e3916949351a32dced71eab7353d` |
 | Four submission screenshots | `tmp/submission-video/evidence/screenshots/`; accepted identities recorded in the [production runbook](./13-final-video-production-runbook.md#13-accepted-production-record) |
 | Final media QA and checksums | `tmp/submission-video/evidence/media-inspection.md`; `tmp/submission-video/evidence/checksums.sha256`; PASS |
-| Primary Codex Session ID | `PENDING` |
+| Primary Codex Session ID | Verified against the representative thread and stored in private evidence; `/feedback` upload succeeded; Devpost field entry `PENDING` |
 | Devpost URL and submitted confirmation | `PENDING` |
 | Entrant / team record | `PENDING` |
-| Anonymous repository, release, video, and submission smoke | `PENDING` |
+| Anonymous repository, release, video, and submission smoke | Repository/source/release/downloaded DMG: PASS. Public YouTube and submitted Devpost project: `PENDING` |
 
 ## 8. Final anonymous smoke
 
 - [ ] Open the Devpost project while logged out and confirm it is marked submitted.
-- [ ] Open https://github.com/aki-0421/coding-wife without a maintainer session and confirm the frozen commit, README, MIT license, and notices are visible.
-- [ ] On macOS 14+ Apple Silicon, download the current submission release without authentication, verify its SHA-256, install it, and complete the primary flow without rebuilding.
+- [x] Open https://github.com/aki-0421/coding-wife without a maintainer session and confirm the frozen product commit, README, MIT license, and notices are visible.
+- [x] On macOS 14+ Apple Silicon, download all three current submission release assets without authentication and verify the DMG sidecar, manifest, byte identity, and canonical package checks.
+- [x] Install the anonymously downloaded DMG, launch the production app for ten seconds, and shut it down gracefully without rebuilding.
 - [ ] Confirm the macOS release shows the same Sol/Luna and Git review behavior. Test Terra conditionally: accept a validated explanation when the connected provider supports the event, or verify a typed unavailable result with zero tool/write authority when it does not. Do not claim the video shows successful automatic Terra generation; it shows one `user_request` and one `user_retry` failing closed before generation.
-- [ ] Treat Windows and Linux artifacts only as install-smoked packaging previews; do not record their presence as proof of production Luna/Terra parity.
+- [x] Treat Windows and Linux artifacts only as install-smoked packaging previews; do not record their presence as proof of production Luna/Terra parity.
 - [ ] Play the YouTube video while logged out; confirm it is under 3:00, has audible English narration, and contains no private data.
 - [ ] Confirm every Devpost link resolves and every factual field matches the frozen source and release.
-- [ ] Confirm the primary Session ID was copied from the representative thread and accepted by the form.
+- [x] Confirm the primary Session ID was copied from the representative thread and stored only in private evidence; `/feedback` upload succeeded.
+- [ ] Confirm the private Session ID was accepted by the Devpost form.
 - [ ] Confirm the entrant or every team member is correct and all required invitations were accepted before the deadline.
 
 ## Official sources reverified on 2026-07-22 JST

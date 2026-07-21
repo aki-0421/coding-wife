@@ -14,14 +14,14 @@ Coding Wife keeps the real coding session, human intervention points, and review
 
 ## Two-minute judge path
 
-On macOS 14 or later with Apple Silicon, after launching the current source build:
+On macOS 14 or later with Apple Silicon, download the [Build Week judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22), verify `Coding-Wife.dmg` against SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`, and launch it:
 
 1. Select **Add project** and choose a current-user-owned, writable Git repository. A disposable repository is recommended.
 2. Send: “Add a Usage section to README.md with one example command, run a relevant verification, and commit the result.”
 3. Review any bounded decision or approval request before continuing. Use **Stop** if the scope no longer matches your intent.
 4. Watch completed Codex messages become short Luna captions, expressions, and motions beside the conversation. Speech is optional.
 5. Open **Commit** and inspect the resulting change in the GitHub-style file navigator and unified diff.
-6. Choose **Explain changes** to present Terra’s redacted explanation of the verified commit.
+6. Choose **Explain changes**. A compatible provider presents a validated Terra explanation; an unsupported provider produces a typed unavailable result and fails closed with no tool or write authority.
 
 The model task itself may take longer than two minutes. The judge path is intentionally one narrow workflow: request, intervene, inspect the commit, and understand the result.
 
@@ -133,12 +133,13 @@ The full current three-model judging path targets **macOS 14 or later on Apple S
 ~~~bash
 git clone https://github.com/aki-0421/coding-wife.git
 cd coding-wife
+git checkout --detach 44d9aab779b9a66ed3f02d0016af061a71ba79c3
 corepack enable
 pnpm install --frozen-lockfile
 pnpm tauri:dev
 ~~~
 
-No environment file is required. Do not put a TTS credential in the repository or in [.env.example](.env.example); configure it in **App Settings > Audio** only if speech is needed.
+The detached checkout selects the exact product source used for the judge prerelease because repository default `develop` remains an older preview. No environment file is required. Do not put a TTS credential in the repository or in [.env.example](.env.example); configure it in **App Settings > Audio** only if speech is needed.
 
 For a disposable judge project, initialize a small repository, create one seed commit, and select that directory through **Add project**. The app does not require proprietary sample data.
 
@@ -158,7 +159,20 @@ See [Testing Coding Wife](docs/testing.md) for CI coverage, desktop QA, packagin
 
 ## Public release and current source
 
-[Coding Wife v0.1.5](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.5) is public and includes SHA-256 sidecars for:
+The primary no-rebuild judge path is the public [Build Week submission prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22). It was built from immutable product source [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3), not from the repository's moving branch tip.
+
+| Judge artifact | Verified value |
+| --- | --- |
+| Platform | macOS 14+ on Apple Silicon |
+| Download | [`Coding-Wife.dmg`](https://github.com/aki-0421/coding-wife/releases/download/build-week-submission-2026-07-22/Coding-Wife.dmg), 22,433,345 bytes |
+| SHA-256 | `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
+| Release validation | Release fault-injection and packaging suite 39/39 PASS; canonical DMG verification PASS |
+| Anonymous QA | All three assets downloaded without authentication; sidecar, manifest, bytes, and canonical verification matched |
+| Install smoke | DMG copy, ten-second production launch, and graceful shutdown PASS |
+
+The app is **ad-hoc signed, not Developer ID signed, and not notarized**. After verifying the checksum, macOS may require one bounded exception: try opening Coding Wife once, then use **System Settings > Privacy & Security > Open Anyway** for Coding Wife only. Do not disable Gatekeeper or remove quarantine globally. Real coding still requires a compatible authenticated local Codex installation and access to the three exact GPT-5.6 models. Terra remains conditional: a compatible provider returns a validated explanation; an unsupported event is recorded as unavailable and fails closed with zero tool and write authority.
+
+The repository's default `develop` branch and the normal [v0.1.5 release](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.5) are older previews. For the exact Build Week product, use the immutable source commit and judge prerelease above. v0.1.5 remains public and includes SHA-256 sidecars for:
 
 | Packaging target | Published artifact |
 | --- | --- |
@@ -166,17 +180,17 @@ See [Testing Coding Wife](docs/testing.md) for CI coverage, desktop QA, packagin
 | Windows x64 | NSIS setup executable |
 | Ubuntu/Debian-compatible Linux x64 | Debian package and AppImage |
 
-**v0.1.5 is an older preview, not the exact Build Week judging build.** It predates 48 subsequent implementation commits that added Terra/Luna orchestration and the latest Chat and Commit interfaces. Use the current repository source and the launch steps above to evaluate the exact workflow described in this README.
+**v0.1.5 is not the Build Week judging build.** It predates the Terra/Luna orchestration and latest Chat and Commit interfaces. Its packages are retained only as older multi-platform previews.
 
 Packaging availability is broader than end-to-end QA:
 
-| Target | Published v0.1.5 package evidence | Current three-model judge path | Optional TTS playback |
+| Target | Published package evidence | Current three-model judge path | Optional TTS playback |
 | --- | --- | --- | --- |
-| macOS 14+ Apple Silicon | DMG built, mounted, and verified | Yes, current source with real Tauri/WKWebView E2E | Yes |
+| macOS 14+ Apple Silicon | Current judge DMG plus older v0.1.5 preview | Yes, immutable `44d9aab…` judge prerelease with real Tauri/WKWebView E2E | Yes |
 | Windows 11 x64 | Preview installer install/uninstall smoke | No equivalent production Terra/Luna path guarantee | No |
 | Ubuntu 22.04 / Debian 12 x64 | Preview package install/extract smoke | No equivalent production Terra/Luna path guarantee | No |
 
-All v0.1.5 artifacts are older previews and do not contain the current Terra/Luna implementation. Their existence and package smoke results are not a claim of full three-model behavioral equivalence. The packages are free of paid signing identities. macOS uses an ad-hoc integrity seal and is not notarized; Windows and Linux packages are unsigned. Verify the release URL, matching checksum, and reviewed source before using a downloaded preview. Bounded installation guidance is in [docs/testing.md](docs/testing.md).
+All v0.1.5 artifacts are older previews and do not contain the current Terra/Luna implementation. Their existence and package smoke results are not a claim of full three-model behavioral equivalence. Windows and Linux previews are unsigned. Verify the release URL, matching checksum, and reviewed source before using any downloaded artifact. Bounded installation guidance is in [docs/testing.md](docs/testing.md).
 
 ## Built during OpenAI Build Week
 
@@ -214,7 +228,7 @@ Humans retained the consequential choices:
 
 ## Honest limitations
 
-- The current three-model Build Week source must be built locally; the public v0.1.5 installers are an older preview.
+- The public judge prerelease is available only for macOS 14+ on Apple Silicon, is ad-hoc signed, and is not notarized. The immutable source remains available for inspection and local builds.
 - Real coding requires a compatible authenticated Codex installation and availability of all three exact GPT-5.6 models. Unsupported or rerouted roles fail closed.
 - The full current three-model judge target and primary end-to-end desktop QA environment are macOS 14+ on Apple Silicon. Windows and Linux v0.1.5 artifacts have packaging smoke evidence, not equivalent production Terra/Luna validation.
 - Optional OpenAI speech playback is macOS-only today. Captions, expression cues, and the core coding workflow do not depend on speech.
