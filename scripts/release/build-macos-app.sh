@@ -64,14 +64,34 @@ classify_app_build_failure() {
   fi
 }
 
+classify_app_verify_failure() {
+  local log="${tool_log:-}"
+  local line=''
+  local cause=''
+
+  [[ -n "$log" && -f "$log" && ! -L "$log" ]] || return 1
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[release\]\ (APP_ARCHITECTURE_INVALID|APP_BUILD_PLATFORM_INVALID|APP_BUNDLE_METADATA_INVALID|APP_CREDENTIAL_CONTENT|APP_DEMO_RUNTIME_PRESENT|APP_DEVELOPER_ID_PRESENT|APP_EXECUTABLE_INVALID|APP_FORBIDDEN_PATH|APP_HIYORI_INVENTORY_INVALID|APP_INFO_PLIST_INVALID|APP_INVENTORY_EXPECTED_INVALID|APP_INVENTORY_MISMATCH|APP_INVENTORY_ROOT_INVALID|APP_INVENTORY_SPECIAL_FILE|APP_LEGAL_RESOURCES_INVALID|APP_LEGAL_RESOURCES_MISMATCH|APP_MINIMUM_SYSTEM_VERSION_INVALID|APP_NOTARIZATION_UNCLASSIFIED|APP_NOTARIZATION_UNEXPECTED|APP_PRIVATE_PATH_CONTENT|APP_PRIVATE_PATH_ENTRY|APP_PRIVATE_PATH_SYMLINK|APP_QUARANTINE_PRESENT|APP_RELEASE_CONFIG_INVALID|APP_RELEASE_TOOL_FAILED|APP_RESOURCE_MISSING|APP_ROOT_MODE_INVALID|APP_SCHEMA_MIGRATION_MISSING|APP_SIGNATURE_NOT_ADHOC|APP_SUPPORT_RUNTIME_MISSING|APP_SYMLINK_ABSOLUTE|APP_SYMLINK_BROKEN|APP_SYMLINK_ESCAPE|APP_TEAM_IDENTIFIER_PRESENT)$ ]]; then
+      cause="${BASH_REMATCH[1]}"
+    fi
+  done <"$log"
+  [[ -n "$cause" ]] || return 1
+  /usr/bin/printf '%s' "$cause"
+}
+
 fail() {
   local code="$1"
   local cause=''
   if [[ "$code" == 'APP_BUILD_FAILED' ]]; then
     cause="$(classify_app_build_failure 2>/dev/null || true)"
+  elif [[ "$code" == 'APP_BUILD_VERIFY_FAILED' ]]; then
+    cause="$(classify_app_verify_failure 2>/dev/null || true)"
   fi
-  case "$cause" in
-    BUILD_STORAGE_EXHAUSTED|BUILD_PROCESS_TERMINATED|RUST_LINK_FAILED|RUST_COMPILE_FAILED|FRONTEND_BUILD_FAILED|TAURI_BUNDLE_FAILED)
+  case "$code:$cause" in
+    APP_BUILD_FAILED:BUILD_STORAGE_EXHAUSTED|APP_BUILD_FAILED:BUILD_PROCESS_TERMINATED|APP_BUILD_FAILED:RUST_LINK_FAILED|APP_BUILD_FAILED:RUST_COMPILE_FAILED|APP_BUILD_FAILED:FRONTEND_BUILD_FAILED|APP_BUILD_FAILED:TAURI_BUNDLE_FAILED)
+      /usr/bin/printf '%s %s cause=%s\n' "$ERROR_PREFIX" "$code" "$cause" >&2
+      ;;
+    APP_BUILD_VERIFY_FAILED:APP_*)
       /usr/bin/printf '%s %s cause=%s\n' "$ERROR_PREFIX" "$code" "$cause" >&2
       ;;
     *) /usr/bin/printf '%s %s\n' "$ERROR_PREFIX" "$code" >&2 ;;
@@ -246,6 +266,7 @@ if ! (
 fi
 
 [[ -d "$candidate_app" && ! -L "$candidate_app" ]] || fail 'APP_BUILD_OUTPUT_INVALID'
+/bin/chmod 755 "$candidate_app" >/dev/null 2>&1 || fail 'APP_BUILD_ROOT_MODE_FAILED'
 if ! (
   cd "$project_root"
   "$node_binary" scripts/licenses/dependency-notices.mjs --check

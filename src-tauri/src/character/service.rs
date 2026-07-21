@@ -1269,18 +1269,37 @@ fn random_generation() -> u64 {
     (u64::from_be_bytes(bytes[0..8].try_into().unwrap_or([0; 8])) & MAX_JS_SAFE_INTEGER).max(1)
 }
 
+fn resolve_builtin_directory_with_source(
+    resource_directory: &Path,
+    source_fallback: Option<&Path>,
+) -> PathBuf {
+    let direct = resource_directory.join("characters/builtin-hiyori");
+    if direct.join(BUILTIN_MANIFEST_FILE).is_file() {
+        return direct;
+    }
+
+    let nested = resource_directory.join("resources/characters/builtin-hiyori");
+    if nested.join(BUILTIN_MANIFEST_FILE).is_file() {
+        return nested;
+    }
+
+    if let Some(source) = source_fallback {
+        if source.join(BUILTIN_MANIFEST_FILE).is_file() {
+            return source.to_path_buf();
+        }
+    }
+
+    direct
+}
+
 pub fn resolve_builtin_directory(resource_directory: &Path) -> PathBuf {
-    let candidates = [
-        resource_directory.join("characters/builtin-hiyori"),
-        resource_directory.join("resources/characters/builtin-hiyori"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/characters/builtin-hiyori"),
-    ];
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.join(BUILTIN_MANIFEST_FILE).is_file())
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/characters/builtin-hiyori")
-        })
+    #[cfg(test)]
+    let source_fallback =
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/characters/builtin-hiyori"));
+    #[cfg(not(test))]
+    let source_fallback: Option<PathBuf> = None;
+
+    resolve_builtin_directory_with_source(resource_directory, source_fallback.as_deref())
 }
 
 #[cfg(test)]
@@ -1452,6 +1471,15 @@ mod tests {
     fn builtin_directory_resolves_source_tree_for_tests() {
         let resolved = resolve_builtin_directory(Path::new("/missing"));
         assert!(resolved.join(BUILTIN_MANIFEST_FILE).is_file());
+    }
+
+    #[test]
+    fn builtin_directory_without_test_source_stays_inside_installed_resources() {
+        let resource_directory = Path::new("/installed/resources");
+        assert_eq!(
+            resolve_builtin_directory_with_source(resource_directory, None),
+            resource_directory.join("characters/builtin-hiyori")
+        );
     }
 
     #[test]

@@ -362,7 +362,9 @@ test("release shell entry points use one plist-based lock and avoid GUI or pipe 
   assert.match(sources[1], /snapshot-create/u)
   assert.match(sources[1], /snapshot-assert/u)
   assert.match(sources[2], /CARGO_TARGET_DIR/u)
+  assert.match(sources[2], /chmod 755 "\$candidate_app"/u)
   assert.match(sources[2], /dependency-notices\.mjs --check/u)
+  assert.match(sources[2], /classify_app_verify_failure/u)
   assert.match(sources[2], /APP_BUILD_READY_VERIFY_FAILED/u)
   assert.match(sources[2], /manifest-create/u)
   assert.match(sources[2], /APP_BUILD_PUBLISH_FAILED/u)
@@ -378,6 +380,7 @@ test("app builder isolates controlled Tauri output and fails closed before publi
   const sourceRoot = path.join(root, "source")
   await mkdir(sourceRoot)
   const fixture = await createProductFixture(sourceRoot)
+  await chmod(fixture.appPath, 0o700)
   const fakeEnvironment = await createFakeTauriBuilder(root, fixture.appPath)
 
   const output = path.join(root, "candidate", "Controlled.app")
@@ -393,6 +396,7 @@ test("app builder isolates controlled Tauri output and fails closed before publi
     /^\[release\] macOS app built and verified run=[0-9a-f-]{36}\.\n$/iu,
   )
   assertPrivatePathsAreRedacted(built, [root, fixture.appPath, output])
+  assert.equal((await lstat(output)).mode & 0o777, 0o755)
   const outputManifest = JSON.parse(
     await readFile(`${output}.release.json`, "utf8"),
   )
@@ -470,7 +474,10 @@ test("app builder isolates controlled Tauri output and fails closed before publi
     FAKE_TAURI_APP: driftFixture.appPath,
   })
   assert.notEqual(drift.status, 0)
-  assert.match(drift.stderr, /^\[release\] APP_BUILD_VERIFY_FAILED\n$/u)
+  assert.match(
+    drift.stderr,
+    /^\[release\] APP_BUILD_VERIFY_FAILED cause=APP_LEGAL_RESOURCES_MISMATCH\n$/u,
+  )
   assertPrivatePathsAreRedacted(drift, [
     root,
     driftFixture.appPath,
@@ -529,6 +536,41 @@ test("combined release keeps private work safe and publishes only a verified fou
   assertPrivatePathsAreRedacted(appFailure, [root, appFailureRoot])
   await assertPathsAbsent(appFailurePaths)
   await assertReleaseCleanup(appFailureRoot)
+
+  const verifyFailureSource = path.join(root, "verify-failure-source")
+  await mkdir(verifyFailureSource)
+  const verifyFailureFixture = await createProductFixture(verifyFailureSource)
+  await writeFile(
+    path.join(
+      verifyFailureFixture.appPath,
+      "Contents",
+      "Resources",
+      "resources",
+      "legal",
+      "THIRD-PARTY-DEPENDENCIES.json",
+    ),
+    "{}\n",
+  )
+  const verifyFailureRoot = path.join(root, "verify-failure-output")
+  const verifyFailurePaths = combinedReleasePaths(verifyFailureRoot)
+  const verifyFailure = runScript(
+    runReleaseScript,
+    ["--output-root", verifyFailureRoot],
+    root,
+    { ...fakeEnvironment, FAKE_TAURI_APP: verifyFailureFixture.appPath },
+  )
+  assert.notEqual(verifyFailure.status, 0)
+  assert.match(
+    verifyFailure.stderr,
+    /^\[release\] RELEASE_APP_FAILED inner=APP_BUILD_VERIFY_FAILED cause=APP_LEGAL_RESOURCES_MISMATCH\n$/u,
+  )
+  assertPrivatePathsAreRedacted(verifyFailure, [
+    root,
+    verifyFailureFixture.appPath,
+    verifyFailureRoot,
+  ])
+  await assertPathsAbsent(verifyFailurePaths)
+  await assertReleaseCleanup(verifyFailureRoot)
 
   const dmgFailureRoot = path.join(root, "dmg-failure-output")
   const dmgFailurePaths = combinedReleasePaths(dmgFailureRoot)
