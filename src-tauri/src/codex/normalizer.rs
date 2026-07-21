@@ -449,6 +449,14 @@ impl EventNormalizer {
                 // These auxiliary status notifications do not affect the
                 // Coding Wife session, turn, model, or approval state.
             }
+            "serverRequest/resolved" => {
+                if !valid_server_request_resolved(params) {
+                    return Err(NormalizeError::InvalidParams);
+                }
+                // The pending card is completed by the exact response command.
+                // This notification contains no answer and is only lifecycle
+                // confirmation from the current App Server.
+            }
             _ => {
                 outcome.events.push(self.unsupported(method, byte_count)?);
                 outcome.unsupported_terminal = method.starts_with("turn/")
@@ -544,6 +552,25 @@ fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
         current = current.get(*key)?;
     }
     current.as_str()
+}
+
+fn valid_server_request_resolved(params: &Value) -> bool {
+    let Some(object) = params.as_object() else {
+        return false;
+    };
+    if object.len() != 2 || !object.contains_key("requestId") || !object.contains_key("threadId") {
+        return false;
+    }
+    let valid_request_id = match object.get("requestId") {
+        Some(Value::String(value)) => !value.is_empty() && value.len() <= 256,
+        Some(Value::Number(value)) => value.as_i64().is_some(),
+        _ => false,
+    };
+    let valid_thread_id = object
+        .get("threadId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty() && value.len() <= 256);
+    valid_request_id && valid_thread_id
 }
 
 struct ToolMetadata {
@@ -986,6 +1013,34 @@ mod tests {
                 .expect("known auxiliary notification");
             assert!(outcome.events.is_empty());
             assert!(!outcome.unsupported_terminal);
+        }
+    }
+
+    #[test]
+    fn current_server_request_resolved_is_consumed_but_invalid_shapes_fail_closed() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        for request_id in [json!("server-rui"), json!(7)] {
+            let outcome = normalizer
+                .normalize(
+                    "serverRequest/resolved",
+                    &json!({"requestId": request_id, "threadId": "thread-1"}),
+                    110,
+                )
+                .expect("current resolved notification");
+            assert!(outcome.events.is_empty());
+            assert!(!outcome.unsupported_terminal);
+        }
+
+        for invalid in [
+            json!({"requestId": "server-rui"}),
+            json!({"requestId": null, "threadId": "thread-1"}),
+            json!({"requestId": "server-rui", "threadId": "thread-1", "future": true}),
+        ] {
+            assert!(matches!(
+                normalizer.normalize("serverRequest/resolved", &invalid, 110),
+                Err(NormalizeError::InvalidParams)
+            ));
         }
     }
 

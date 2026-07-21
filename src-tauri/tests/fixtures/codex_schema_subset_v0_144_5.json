@@ -140,6 +140,14 @@
         "type": "object",
         "required": ["method", "params"],
         "properties": {
+          "method": { "type": "string", "enum": ["serverRequest/resolved"] },
+          "params": { "$ref": "#/definitions/ServerRequestResolvedNotification" }
+        }
+      },
+      {
+        "type": "object",
+        "required": ["method", "params"],
+        "properties": {
           "method": { "type": "string", "enum": ["model/rerouted"] },
           "params": { "$ref": "#/definitions/ModelReroutedNotification" }
         }
@@ -283,10 +291,39 @@
     "type": "object",
     "required": ["itemId", "questions", "threadId", "turnId"],
     "properties": {
-      "itemId": {},
-      "questions": {},
-      "threadId": {},
-      "turnId": {}
+      "autoResolutionMs": { "type": ["integer", "null"], "format": "uint64" },
+      "itemId": { "type": "string" },
+      "questions": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/ToolRequestUserInputQuestion" }
+      },
+      "threadId": { "type": "string" },
+      "turnId": { "type": "string" }
+    },
+    "definitions": {
+      "ToolRequestUserInputOption": {
+        "type": "object",
+        "required": ["description", "label"],
+        "properties": {
+          "description": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      },
+      "ToolRequestUserInputQuestion": {
+        "type": "object",
+        "required": ["header", "id", "question"],
+        "properties": {
+          "header": { "type": "string" },
+          "id": { "type": "string" },
+          "isOther": { "type": "boolean", "default": false },
+          "isSecret": { "type": "boolean", "default": false },
+          "options": {
+            "type": ["array", "null"],
+            "items": { "$ref": "#/definitions/ToolRequestUserInputOption" }
+          },
+          "question": { "type": "string" }
+        }
+      }
     }
   },
   "ToolRequestUserInputResponse.json": {
@@ -294,6 +331,15 @@
     "type": "object",
     "required": ["answers"],
     "properties": { "answers": {} }
+  },
+  "v2/ServerRequestResolvedNotification.json": {
+    "title": "ServerRequestResolvedNotification",
+    "type": "object",
+    "required": ["requestId", "threadId"],
+    "properties": {
+      "requestId": {},
+      "threadId": { "type": "string" }
+    }
   },
   "DynamicToolCallParams.json": {
     "title": "DynamicToolCallParams",

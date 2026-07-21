@@ -1814,7 +1814,7 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
 }
 
 #[tokio::test]
-async fn native_rui_round_trips_one_strict_answer() {
+async fn native_rui_round_trips_one_bounded_other_answer() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("native_rui");
     let supervisor = test_supervisor();
@@ -1853,11 +1853,14 @@ async fn native_rui_round_trips_one_strict_answer() {
             "id": "choice",
             "header": "Choice",
             "question": "Choose a safe option",
+            "isOther": true,
+            "isSecret": false,
             "options": [
                 {"label": "Continue", "description": "Continue safely"},
                 {"label": "Stop", "description": "Stop this turn"}
             ]
-        }]
+        }],
+        "autoResolutionMs": null
     });
     let pending_id = pending_id("server-rui", &params);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -1869,7 +1872,7 @@ async fn native_rui_round_trips_one_strict_answer() {
                 response: PendingResponse::UserInput {
                     answers: std::collections::BTreeMap::from([(
                         "choice".to_owned(),
-                        vec!["Continue".to_owned()],
+                        vec!["Another safe path".to_owned()],
                     )]),
                 },
             })
@@ -1887,10 +1890,10 @@ async fn native_rui_round_trips_one_strict_answer() {
         }
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while !read_state(&fixture.state)
-        .await
-        .contains("native_rui_answered")
-    {
+    while {
+        let state = read_state(&fixture.state).await;
+        !(state.contains("native_rui_answered") && state.contains("native_rui_resolved_sent"))
+    } {
         assert!(
             tokio::time::Instant::now() < deadline,
             "RUI response missing"

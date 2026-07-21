@@ -928,12 +928,15 @@ def main():
                                     "id": "choice",
                                     "header": "Choice",
                                     "question": "Choose a safe option",
+                                    "isOther": True,
+                                    "isSecret": False,
                                     "options": [
                                         {"label": "Continue", "description": "Continue safely"},
                                         {"label": "Stop", "description": "Stop this turn"},
                                     ],
                                 }
                             ],
+                            "autoResolutionMs": None,
                         },
                     }
                 )
@@ -1061,9 +1064,19 @@ def main():
             continue
         if message_id == "server-rui":
             if message.get("result", {}).get("answers", {}).get("choice") == {
-                "answers": ["Continue"]
+                "answers": ["Another safe path"]
             }:
                 record("native_rui_answered")
+                send(
+                    {
+                        "method": "serverRequest/resolved",
+                        "params": {
+                            "requestId": "server-rui",
+                            "threadId": "thread-fixture",
+                        },
+                    }
+                )
+                record("native_rui_resolved_sent")
             continue
         if message_id is not None:
             result(message_id, {})
