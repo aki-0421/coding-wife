@@ -1919,20 +1919,30 @@ pub(crate) fn validate_presence_input(
         TurnCompleted,
     };
 
-    let valid_shape = match (
-        input.trigger,
-        input.semantic_state,
-        input.retrying,
-        input.elapsed_bucket,
-    ) {
+    let valid_shape = matches!(
+        (
+            input.trigger,
+            input.semantic_state,
+            input.retrying,
+            input.elapsed_bucket,
+        ),
         (MainMessage, Working, false, PresenceElapsedBucket::None)
-        | (DecisionWait, Asking, false, PresenceElapsedBucket::None)
-        | (RecoverableFailure, Warning, _, PresenceElapsedBucket::None)
-        | (TerminalFailure, Error, false, PresenceElapsedBucket::None)
-        | (LongMilestone, Working, false, Seconds45Plus | Seconds120Plus)
-        | (CommitReady | TurnCompleted, Success, false, PresenceElapsedBucket::None) => true,
-        _ => false,
-    };
+            | (DecisionWait, Asking, false, PresenceElapsedBucket::None)
+            | (RecoverableFailure, Warning, _, PresenceElapsedBucket::None)
+            | (TerminalFailure, Error, false, PresenceElapsedBucket::None)
+            | (
+                LongMilestone,
+                Working,
+                false,
+                Seconds45Plus | Seconds120Plus
+            )
+            | (
+                CommitReady | TurnCompleted,
+                Success,
+                false,
+                PresenceElapsedBucket::None
+            )
+    );
     let valid_excerpt = match (input.trigger, input.message_excerpt.as_deref()) {
         (MainMessage, Some(excerpt)) => {
             excerpt.chars().count() <= 240 && presence_public_text_is_safe(excerpt)

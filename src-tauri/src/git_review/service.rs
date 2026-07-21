@@ -204,6 +204,8 @@ impl GitReviewService {
         .await
     }
 
+    // The explicit proof identity keeps this security boundary auditable at its sole call site.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn complete_trusted_commit_candidate_exact(
         &self,
         candidate: TrustedCommitCandidate,
