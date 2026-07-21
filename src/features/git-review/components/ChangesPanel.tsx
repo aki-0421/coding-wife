@@ -122,14 +122,17 @@ function DiffContent({
 }: Pick<ChangesPanelProps, "copy" | "diffStatus" | "diff">) {
   if (diffStatus === "idle") {
     return (
-      <p className="m-auto text-caption text-muted-foreground">
+      <p className="m-auto w-full min-w-0 px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
         {copy.chooseFile}
       </p>
     )
   }
   if (diffStatus === "loading") {
     return (
-      <div className="flex size-full flex-col gap-sm p-md" aria-live="polite">
+      <div
+        className="flex size-full min-w-0 flex-col gap-sm p-md"
+        aria-live="polite"
+      >
         <span className="flex items-center gap-xs text-caption text-muted-foreground">
           <LoaderCircleIcon
             aria-hidden="true"
@@ -145,7 +148,7 @@ function DiffContent({
   }
   if (diffStatus === "error" || diff === null) {
     return (
-      <p className="m-auto flex max-w-md items-start gap-xs px-lg text-caption text-destructive">
+      <p className="m-auto flex w-full min-w-0 max-w-md items-start gap-xs px-lg text-caption whitespace-normal text-destructive break-words">
         <AlertCircleIcon
           aria-hidden="true"
           className="mt-xxs size-3 shrink-0"
@@ -156,12 +159,15 @@ function DiffContent({
   }
   if (diff.state !== "text") {
     return (
-      <div className="m-auto flex max-w-md flex-col items-center gap-xs px-lg text-center">
+      <div
+        className="m-auto flex w-full min-w-0 max-w-md flex-col items-center gap-xs px-lg text-center"
+        data-git-diff-state={diff.state}
+      >
         <FileCode2Icon
           aria-hidden="true"
           className="size-5 text-muted-foreground"
         />
-        <p className="m-0 text-caption text-foreground">
+        <p className="m-0 w-full min-w-0 text-caption whitespace-normal text-foreground break-words">
           {copy.diffStates[diff.state]}
         </p>
       </div>
@@ -171,7 +177,7 @@ function DiffContent({
   const parsed = parseUnifiedDiff(diff.content)
   if (parsed.status !== "ready") {
     return (
-      <p className="m-auto px-lg text-center text-caption text-muted-foreground">
+      <p className="m-auto w-full min-w-0 max-w-md px-lg text-center text-caption whitespace-normal text-muted-foreground break-words">
         {parsed.status === "render_limit"
           ? copy.diffRenderLimit
           : copy.diffEmpty}
