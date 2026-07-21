@@ -15,12 +15,14 @@ use crate::git_review::types::CommitEvidenceV1;
 
 use super::binary::{BinaryInfo, SchemaProbe};
 use super::bundled_skill::{
-    resolve_bundled_skill, ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME,
+    resolve_bundled_skill, ResolvedBundledSkill, DIRECT_PRESENCE_SKILL_NAME,
+    EXPLAIN_COMMIT_SKILL_NAME,
 };
 use super::process::{spawn_support_process, ProcessRuntime};
 use super::protocol::{
-    account_read_params, parse_support_thread_policy_response, server_error,
-    support_thread_start_params, support_turn_start_params, turn_interrupt_params, InboundMessage,
+    account_read_params, parse_support_thread_policy_response, presence_turn_start_params,
+    server_error, support_thread_start_params, support_turn_start_params, turn_interrupt_params,
+    InboundMessage,
 };
 use super::redaction::redact_text;
 #[cfg(test)]
@@ -31,7 +33,9 @@ use super::support_isolation::{
 };
 use super::support_private::{bridge_auth, support_config, PrivateRunDirectory};
 use super::support_probe::EXPECTED_SUPPORT_TOOL_HASH;
-use super::types::{TurnExecutionClass, CODEX_COMMIT_EXPLAINER_MODEL};
+use super::types::{
+    TurnExecutionClass, CODEX_COMMIT_EXPLAINER_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL,
+};
 
 pub const SUPPORT_MAX_SESSION_CAPACITY: usize = 1;
 pub const SUPPORT_PERMISSION_PROFILE: &str = "coding-wife-support-zero";
@@ -65,9 +69,105 @@ impl SupportModelRole {
     pub fn exact_model(self) -> &'static str {
         match self {
             Self::CommitExplainer => CODEX_COMMIT_EXPLAINER_MODEL,
-            Self::PresenceDirector => super::types::CODEX_PRESENCE_DIRECTOR_MODEL,
+            Self::PresenceDirector => CODEX_PRESENCE_DIRECTOR_MODEL,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceLocale {
+    Ja,
+    En,
+}
+
+impl PresenceLocale {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ja => "ja",
+            Self::En => "en",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceTrigger {
+    DecisionWait,
+    RecoverableFailure,
+    TerminalFailure,
+    LongMilestone,
+    CommitReady,
+    TurnCompleted,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceSemanticState {
+    Neutral,
+    Working,
+    Asking,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum PresenceElapsedBucket {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "45s_plus")]
+    Seconds45Plus,
+    #[serde(rename = "120s_plus")]
+    Seconds120Plus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceCue {
+    Neutral,
+    Working,
+    Asking,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PresenceDirectorInputV1 {
+    pub schema_version: u16,
+    pub locale: PresenceLocale,
+    pub trigger: PresenceTrigger,
+    pub semantic_state: PresenceSemanticState,
+    pub retrying: bool,
+    pub elapsed_bucket: PresenceElapsedBucket,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PresenceDirectionV1 {
+    pub schema_version: u16,
+    pub locale: PresenceLocale,
+    pub utterance: String,
+    pub cue: PresenceCue,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SupportPresenceRequest {
+    pub request_id: String,
+    pub workspace_id: String,
+    pub workspace_generation: u64,
+    pub input: PresenceDirectorInputV1,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SupportPresenceResult {
+    pub direction: PresenceDirectionV1,
+    pub usage: SupportUsage,
+    pub latency_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -450,6 +550,25 @@ impl SupportRuntime {
             schema,
             resource_directory,
             auth_source,
+            SupportModelRole::CommitExplainer,
+            false,
+            false,
+        )
+        .await
+    }
+
+    pub async fn construct_presence(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+    ) -> Result<Self, SupportRuntimeConstructionError> {
+        Self::construct_inner(
+            binary,
+            schema,
+            resource_directory,
+            auth_source,
+            SupportModelRole::PresenceDirector,
             false,
             false,
         )
@@ -474,6 +593,7 @@ impl SupportRuntime {
             schema,
             resource_directory,
             auth_source,
+            SupportModelRole::CommitExplainer,
             inject_initialization_failure,
             defer_graceful_cleanup_once,
         )
@@ -485,13 +605,18 @@ impl SupportRuntime {
         schema: &SchemaProbe,
         resource_directory: &Path,
         auth_source: Option<&Path>,
+        model_role: SupportModelRole,
         inject_initialization_failure: bool,
         defer_graceful_cleanup_once: bool,
     ) -> Result<Self, SupportRuntimeConstructionError> {
         verify_release(binary, schema).await?;
-        let verified_skill = resolve_bundled_skill(resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
+        let skill_name = match model_role {
+            SupportModelRole::CommitExplainer => EXPLAIN_COMMIT_SKILL_NAME,
+            SupportModelRole::PresenceDirector => DIRECT_PRESENCE_SKILL_NAME,
+        };
+        let verified_skill = resolve_bundled_skill(resource_directory, skill_name)
             .map_err(|_| SupportRuntimeError::Skill)?;
-        run_isolation_probe(binary, &verified_skill).await?;
+        run_isolation_probe(binary, &verified_skill, model_role).await?;
 
         let run_directory = PrivateRunDirectory::create("runtime")?;
         let skill = run_directory.snapshot_support_skill(&verified_skill)?;
@@ -500,7 +625,7 @@ impl SupportRuntime {
             .or_else(default_auth_source)
             .ok_or(SupportRuntimeError::AuthBridge)?;
         bridge_auth(&auth_source, &run_directory.codex_home)?;
-        run_directory.write_config(&support_config(CODEX_COMMIT_EXPLAINER_MODEL, None))?;
+        run_directory.write_config(&support_config(model_role.exact_model(), None))?;
         let run_directory = Arc::new(run_directory);
 
         let (signals, receiver) = mpsc::channel(SUPPORT_SIGNAL_QUEUE_CAPACITY);
@@ -544,7 +669,7 @@ impl SupportRuntime {
                     "thread/start",
                     support_thread_start_params(
                         &run_directory.workspace,
-                        CODEX_COMMIT_EXPLAINER_MODEL,
+                        model_role.exact_model(),
                         Some("openai"),
                     ),
                     Duration::from_secs(5),
@@ -554,7 +679,7 @@ impl SupportRuntime {
             let thread = parse_support_thread_policy_response(
                 &thread,
                 &run_directory.workspace,
-                CODEX_COMMIT_EXPLAINER_MODEL,
+                model_role.exact_model(),
                 Some("openai"),
             )
             .map_err(|_| SupportRuntimeError::Policy)?;
@@ -581,8 +706,8 @@ impl SupportRuntime {
             audit: SupportIsolationAudit {
                 capacity: SUPPORT_MAX_SESSION_CAPACITY,
                 execution_class: TurnExecutionClass::Support,
-                model_role: SupportModelRole::CommitExplainer,
-                model: CODEX_COMMIT_EXPLAINER_MODEL.to_owned(),
+                model_role,
+                model: model_role.exact_model().to_owned(),
                 cli_version: binary.cli_version.clone(),
                 binary_hash_prefix: prefix(&binary.executable_sha256),
                 schema_fingerprint_prefix: prefix(&schema.fingerprint),
@@ -613,6 +738,9 @@ impl SupportRuntime {
         &self,
         request: SupportExplainRequest,
     ) -> Result<SupportExplainResult, SupportRuntimeError> {
+        if self.audit.model_role != SupportModelRole::CommitExplainer {
+            return Err(self.terminal_failure(SupportRuntimeError::Policy).await);
+        }
         if self.cancel_requested.load(Ordering::Acquire) {
             return Err(SupportRuntimeError::Canceled);
         }
@@ -733,6 +861,133 @@ impl SupportRuntime {
         let result = SupportExplainResult {
             request_id: request.request_id,
             explanation,
+            usage: terminal.usage,
+            latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        };
+        self.shutdown_and_cleanup().await?;
+        *self.active.lock().await = None;
+        Ok(result)
+    }
+
+    pub async fn direct_presence(
+        &self,
+        request: SupportPresenceRequest,
+    ) -> Result<SupportPresenceResult, SupportRuntimeError> {
+        if self.audit.model_role != SupportModelRole::PresenceDirector {
+            return Err(self.terminal_failure(SupportRuntimeError::Policy).await);
+        }
+        if self.cancel_requested.load(Ordering::Acquire) {
+            return Err(SupportRuntimeError::Canceled);
+        }
+        validate_presence_request(&request)?;
+        let input = serde_json::to_vec(&request.input).map_err(|_| SupportRuntimeError::Output)?;
+        if input.len() > MAX_SUPPORT_INPUT_BYTES {
+            return Err(SupportRuntimeError::Output);
+        }
+        let input = String::from_utf8(input).map_err(|_| SupportRuntimeError::Output)?;
+        let params = match presence_turn_start_params(
+            &self.thread_id,
+            &self.cleanup.run_directory().workspace,
+            &request.request_id,
+            &input,
+            request.input.locale.as_str(),
+            &self.skill,
+        ) {
+            Ok(params) => params,
+            Err(_) => return Err(self.terminal_failure(SupportRuntimeError::Skill).await),
+        };
+        if self.used.swap(true, Ordering::AcqRel) {
+            return Err(SupportRuntimeError::AlreadyUsed);
+        }
+        if self.cancel_requested.load(Ordering::Acquire) {
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
+        }
+        let started = Instant::now();
+        let canceled = Arc::new(AtomicBool::new(
+            self.cancel_requested.load(Ordering::Acquire),
+        ));
+        {
+            let mut active = self.active.lock().await;
+            if active.is_some() {
+                return Err(SupportRuntimeError::Busy);
+            }
+            *active = Some(ActiveSupportTurn {
+                thread_id: self.thread_id.clone(),
+                turn_id: None,
+                canceled: canceled.clone(),
+            });
+        }
+        let turn = match self
+            .cleanup
+            .runtime()
+            .connection
+            .request("turn/start", params, SUPPORT_TASK_TIMEOUT)
+            .await
+        {
+            Ok(turn) => turn,
+            Err(error) => {
+                let error = if canceled.load(Ordering::Acquire) {
+                    SupportRuntimeError::Canceled
+                } else {
+                    map_rpc_error(error)
+                };
+                return Err(self.terminal_failure(error).await);
+            }
+        };
+        let Some(turn_id) = turn
+            .pointer("/turn/id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && value.len() <= 256)
+            .map(str::to_owned)
+        else {
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
+        };
+        let turn_was_addressed = {
+            let mut active = self.active.lock().await;
+            active.as_mut().is_some_and(|active| {
+                active.turn_id = Some(turn_id.clone());
+                true
+            })
+        };
+        if !turn_was_addressed {
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
+        }
+        if canceled.load(Ordering::Acquire) {
+            let _ = self.interrupt(&self.thread_id, &turn_id).await;
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
+        }
+
+        let remaining = SUPPORT_TASK_TIMEOUT.saturating_sub(started.elapsed());
+        let terminal = self
+            .wait_for_turn(&self.thread_id, &turn_id, remaining)
+            .await;
+        let terminal = match terminal {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = self.interrupt(&self.thread_id, &turn_id).await;
+                let error = if canceled.load(Ordering::Acquire) {
+                    SupportRuntimeError::Canceled
+                } else {
+                    error
+                };
+                return Err(self.terminal_failure(error).await);
+            }
+        };
+        if canceled.load(Ordering::Acquire) || terminal.status == "interrupted" {
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
+        }
+        if terminal.status != "completed" {
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
+        }
+        let Some(text) = terminal.agent_message else {
+            return Err(self.terminal_failure(SupportRuntimeError::Output).await);
+        };
+        let direction = match parse_presence_direction(&text, &request.input) {
+            Ok(direction) => direction,
+            Err(error) => return Err(self.terminal_failure(error).await),
+        };
+        let result = SupportPresenceResult {
+            direction,
             usage: terminal.usage,
             latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         };
@@ -1098,6 +1353,102 @@ fn valid_full_sha(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn validate_presence_request(request: &SupportPresenceRequest) -> Result<(), SupportRuntimeError> {
+    let valid_identifier = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.')
+            })
+    };
+    if !valid_identifier(&request.request_id)
+        || !valid_identifier(&request.workspace_id)
+        || request.workspace_generation == 0
+    {
+        return Err(SupportRuntimeError::Output);
+    }
+    validate_presence_input(&request.input)
+}
+
+pub(crate) fn validate_presence_input(
+    input: &PresenceDirectorInputV1,
+) -> Result<(), SupportRuntimeError> {
+    use PresenceElapsedBucket::{None, Seconds120Plus, Seconds45Plus};
+    use PresenceSemanticState::{Asking, Error, Success, Warning, Working};
+    use PresenceTrigger::{
+        CommitReady, DecisionWait, LongMilestone, RecoverableFailure, TerminalFailure,
+        TurnCompleted,
+    };
+
+    let valid = input.schema_version == 1
+        && match (
+            input.trigger,
+            input.semantic_state,
+            input.retrying,
+            input.elapsed_bucket,
+        ) {
+            (DecisionWait, Asking, false, None)
+            | (RecoverableFailure, Warning, _, None)
+            | (TerminalFailure, Error, false, None)
+            | (LongMilestone, Working, false, Seconds45Plus | Seconds120Plus)
+            | (CommitReady | TurnCompleted, Success, false, None) => true,
+            _ => false,
+        };
+    valid.then_some(()).ok_or(SupportRuntimeError::Output)
+}
+
+pub(crate) fn validate_presence_direction(
+    direction: &PresenceDirectionV1,
+    input: &PresenceDirectorInputV1,
+) -> Result<(), SupportRuntimeError> {
+    validate_presence_input(input)?;
+    let serialized = serde_json::to_vec(direction).map_err(|_| SupportRuntimeError::Output)?;
+    let public_value = serde_json::to_value(direction).map_err(|_| SupportRuntimeError::Output)?;
+    if serialized.len() > MAX_SUPPORT_OUTPUT_BYTES
+        || direction.schema_version != 1
+        || direction.locale != input.locale
+        || direction.utterance.is_empty()
+        || direction.utterance.trim() != direction.utterance
+        || direction.utterance.chars().count() > 160
+        || value_contains_private_string(&public_value)
+        || value_contains_control_character(&public_value)
+        || !presence_cue_allowed(input.trigger, direction.cue)
+    {
+        return Err(SupportRuntimeError::Output);
+    }
+    Ok(())
+}
+
+fn presence_cue_allowed(trigger: PresenceTrigger, cue: PresenceCue) -> bool {
+    use PresenceCue::{Asking, Error, Neutral, Success, Warning, Working};
+    use PresenceTrigger::{
+        CommitReady, DecisionWait, LongMilestone, RecoverableFailure, TerminalFailure,
+        TurnCompleted,
+    };
+
+    matches!(
+        (trigger, cue),
+        (DecisionWait, Asking | Neutral)
+            | (RecoverableFailure, Warning | Neutral)
+            | (TerminalFailure, Error | Warning | Neutral)
+            | (LongMilestone, Working | Neutral)
+            | (CommitReady | TurnCompleted, Success | Neutral)
+    )
+}
+
+pub(crate) fn parse_presence_direction(
+    text: &str,
+    input: &PresenceDirectorInputV1,
+) -> Result<PresenceDirectionV1, SupportRuntimeError> {
+    if text.len() > MAX_SUPPORT_OUTPUT_BYTES {
+        return Err(SupportRuntimeError::Output);
+    }
+    let direction: PresenceDirectionV1 =
+        serde_json::from_str(text).map_err(|_| SupportRuntimeError::Output)?;
+    validate_presence_direction(&direction, input)?;
+    Ok(direction)
+}
+
 pub(super) fn parse_explanation(
     text: &str,
     expected_locale: &str,
@@ -1209,6 +1560,182 @@ mod tests {
             SupportModelRole::CommitExplainer.exact_model(),
             SupportModelRole::PresenceDirector.exact_model()
         );
+    }
+
+    fn presence_input(
+        trigger: PresenceTrigger,
+        semantic_state: PresenceSemanticState,
+        retrying: bool,
+        elapsed_bucket: PresenceElapsedBucket,
+    ) -> PresenceDirectorInputV1 {
+        PresenceDirectorInputV1 {
+            schema_version: 1,
+            locale: PresenceLocale::Ja,
+            trigger,
+            semantic_state,
+            retrying,
+            elapsed_bucket,
+        }
+    }
+
+    fn presence_direction(utterance: &str, cue: PresenceCue) -> PresenceDirectionV1 {
+        PresenceDirectionV1 {
+            schema_version: 1,
+            locale: PresenceLocale::Ja,
+            utterance: utterance.to_owned(),
+            cue,
+        }
+    }
+
+    #[test]
+    fn presence_input_serializes_only_the_six_pathless_fields() {
+        let input = presence_input(
+            PresenceTrigger::DecisionWait,
+            PresenceSemanticState::Asking,
+            false,
+            PresenceElapsedBucket::None,
+        );
+        let value = serde_json::to_value(&input).expect("presence input");
+
+        assert_eq!(
+            value,
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "trigger": "decision_wait",
+                "semanticState": "asking",
+                "retrying": false,
+                "elapsedBucket": "none"
+            })
+        );
+        assert_eq!(value.as_object().map(serde_json::Map::len), Some(6));
+        for forbidden in [
+            "requestId",
+            "workspaceId",
+            "workspaceGeneration",
+            "path",
+            "text",
+            "diff",
+            "secret",
+        ] {
+            assert!(value.get(forbidden).is_none(), "included {forbidden}");
+        }
+    }
+
+    #[test]
+    fn presence_input_accepts_only_documented_trigger_state_combinations() {
+        use PresenceElapsedBucket::{None, Seconds120Plus, Seconds45Plus};
+        use PresenceSemanticState::{Asking, Error, Success, Warning, Working};
+        use PresenceTrigger::{
+            CommitReady, DecisionWait, LongMilestone, RecoverableFailure, TerminalFailure,
+            TurnCompleted,
+        };
+        for input in [
+            presence_input(DecisionWait, Asking, false, None),
+            presence_input(RecoverableFailure, Warning, false, None),
+            presence_input(RecoverableFailure, Warning, true, None),
+            presence_input(TerminalFailure, Error, false, None),
+            presence_input(LongMilestone, Working, false, Seconds45Plus),
+            presence_input(LongMilestone, Working, false, Seconds120Plus),
+            presence_input(CommitReady, Success, false, None),
+            presence_input(TurnCompleted, Success, false, None),
+        ] {
+            validate_presence_input(&input).expect("documented presence input");
+        }
+
+        for input in [
+            presence_input(DecisionWait, Asking, true, None),
+            presence_input(DecisionWait, Working, false, None),
+            presence_input(TerminalFailure, Error, true, None),
+            presence_input(LongMilestone, Working, false, None),
+            presence_input(CommitReady, Success, false, Seconds45Plus),
+        ] {
+            assert_eq!(
+                validate_presence_input(&input),
+                Err(SupportRuntimeError::Output)
+            );
+        }
+        let mut wrong_version = presence_input(DecisionWait, Asking, false, None);
+        wrong_version.schema_version = 2;
+        assert_eq!(
+            validate_presence_input(&wrong_version),
+            Err(SupportRuntimeError::Output)
+        );
+    }
+
+    #[test]
+    fn presence_direction_parser_is_closed_locale_bound_private_and_cue_scoped() {
+        let input = presence_input(
+            PresenceTrigger::DecisionWait,
+            PresenceSemanticState::Asking,
+            false,
+            PresenceElapsedBucket::None,
+        );
+        let valid = serde_json::to_string(&presence_direction(
+            "確認が必要なところで待っています。",
+            PresenceCue::Asking,
+        ))
+        .expect("valid presence direction");
+        parse_presence_direction(&valid, &input).expect("valid presence direction");
+
+        for invalid in [
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "待っています。",
+                "cue": "asking",
+                "extra": true
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "en",
+                "utterance": "Waiting for your decision.",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "x".repeat(161),
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": " 余白は許可しません。",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "制御\n文字は許可しません。",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "src/private.rs を確認しています。",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "https://example.com を確認しています。",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "待っています。",
+                "cue": "success"
+            }),
+        ] {
+            let text = serde_json::to_string(&invalid).expect("invalid direction fixture");
+            assert_eq!(
+                parse_presence_direction(&text, &input),
+                Err(SupportRuntimeError::Output),
+                "accepted {text}"
+            );
+        }
     }
 
     fn explanation(locale: &str) -> String {

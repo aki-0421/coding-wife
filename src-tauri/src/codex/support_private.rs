@@ -21,7 +21,9 @@ use crate::platform_fs::{
     O_NOFOLLOW,
 };
 
-use super::bundled_skill::{ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME};
+use super::bundled_skill::{
+    ResolvedBundledSkill, DIRECT_PRESENCE_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME,
+};
 use super::support::{SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
 
 const MAX_AUTH_BYTES: u64 = 1024 * 1024;
@@ -124,12 +126,14 @@ impl PrivateRunDirectory {
         &self,
         skill: &ResolvedBundledSkill,
     ) -> Result<ResolvedBundledSkill, SupportRuntimeError> {
-        if skill.name != EXPLAIN_COMMIT_SKILL_NAME
-            || skill.content_digest
-                != format!(
-                    "sha256:{}",
-                    hex::encode(Sha256::digest(skill.verified_entrypoint()))
-                )
+        if !matches!(
+            skill.name.as_str(),
+            EXPLAIN_COMMIT_SKILL_NAME | DIRECT_PRESENCE_SKILL_NAME
+        ) || skill.content_digest
+            != format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(skill.verified_entrypoint()))
+            )
         {
             return Err(SupportRuntimeError::Skill);
         }
@@ -759,12 +763,18 @@ mod tests {
 
     #[test]
     fn support_config_pins_the_requested_role_model_and_zero_authority() {
-        let config = support_config(crate::codex::types::CODEX_COMMIT_EXPLAINER_MODEL, None);
+        let terra = support_config(crate::codex::types::CODEX_COMMIT_EXPLAINER_MODEL, None);
 
-        assert!(config.contains("model = \"gpt-5.6-terra\""));
-        assert!(!config.contains("gpt-5.6-sol"));
-        assert!(!config.contains("gpt-5.6-luna"));
-        assert!(config.contains("default_permissions = \"coding-wife-support-zero\""));
+        assert!(terra.contains("model = \"gpt-5.6-terra\""));
+        assert!(!terra.contains("gpt-5.6-sol"));
+        assert!(!terra.contains("gpt-5.6-luna"));
+        assert!(terra.contains("default_permissions = \"coding-wife-support-zero\""));
+
+        let luna = support_config(crate::codex::types::CODEX_PRESENCE_DIRECTOR_MODEL, None);
+        assert!(luna.contains("model = \"gpt-5.6-luna\""));
+        assert!(!luna.contains("gpt-5.6-sol"));
+        assert!(!luna.contains("gpt-5.6-terra"));
+        assert!(luna.contains("default_permissions = \"coding-wife-support-zero\""));
     }
 
     fn write_auth_copy(run: &PrivateRunDirectory) -> PathBuf {

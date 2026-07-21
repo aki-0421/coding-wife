@@ -232,7 +232,10 @@ def validate_skill(inputs, expected_name):
             return False, None
         if skill_path.parent.name != expected_name:
             return False, None
-        if expected_name == "coding-wife-explain-commit":
+        if expected_name in (
+            "coding-wife-explain-commit",
+            "coding-wife-direct-presence",
+        ):
             private_shape = (
                 skill_path.parent.parent.name == "skills"
                 and skill_path.parent.parent.parent.name.startswith(
@@ -243,7 +246,12 @@ def validate_skill(inputs, expected_name):
                 and stat.S_IMODE(skill_path.parent.parent.stat().st_mode) == 0o700
             )
             digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
-            return private_shape, (skill.get("name"), "1.1.0", digest)
+            version = (
+                "1.1.0"
+                if expected_name == "coding-wife-explain-commit"
+                else "1.0.0"
+            )
+            return private_shape, (skill.get("name"), version, digest)
         manifest_path = skill_path.parents[1] / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = [
@@ -300,6 +308,31 @@ def support_explanation(locale):
                     "text": "One bounded change",
                 },
             ],
+        },
+        separators=(",", ":"),
+    )
+
+
+def support_presence_direction(locale, trigger):
+    utterance = (
+        "確認が必要なところで待っています。"
+        if locale == "ja"
+        else "Waiting where your decision is needed."
+    )
+    cue = {
+        "decision_wait": "asking",
+        "recoverable_failure": "warning",
+        "terminal_failure": "error",
+        "long_milestone": "working",
+        "commit_ready": "success",
+        "turn_completed": "success",
+    }.get(trigger, "neutral")
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "locale": locale,
+            "utterance": utterance,
+            "cue": cue,
         },
         separators=(",", ":"),
     )
@@ -658,7 +691,8 @@ def main():
                 cwd = pathlib.Path(params.get("cwd", ""))
                 support_valid = (
                     method == "thread/start"
-                    and params.get("model") == "gpt-5.6-terra"
+                    and params.get("model")
+                    in ("gpt-5.6-terra", "gpt-5.6-luna")
                     and params.get("approvalPolicy") == "never"
                     and params.get("permissions") == "coding-wife-support-zero"
                     and params.get("ephemeral") is True
@@ -817,19 +851,12 @@ def main():
                 continuation = None
             if EXECUTION_CLASS == "support":
                 required_output = params.get("outputSchema", {}).get("required")
-                valid = (
-                    params.get("threadId") == "support-thread-fixture"
-                    and params.get("model") == "gpt-5.6-terra"
-                    and params.get("effort") == "low"
-                    and isinstance(params.get("clientUserMessageId"), str)
-                    and params.get("approvalPolicy") == "never"
-                    and params.get("permissions") == "coding-wife-support-zero"
-                    and params.get("environments") == []
-                    and params.get("runtimeWorkspaceRoots") == []
-                    and isinstance(params.get("outputSchema"), dict)
-                    and params["outputSchema"].get("additionalProperties") is False
-                    and required_output
-                    == [
+                support_model = params.get("model")
+                presence_support = support_model == "gpt-5.6-luna"
+                expected_output = (
+                    ["schemaVersion", "locale", "utterance", "cue"]
+                    if presence_support
+                    else [
                         "schemaVersion",
                         "locale",
                         "summary",
@@ -841,6 +868,19 @@ def main():
                         "howToReadNext",
                         "narrationChunks",
                     ]
+                )
+                valid = (
+                    params.get("threadId") == "support-thread-fixture"
+                    and support_model in ("gpt-5.6-terra", "gpt-5.6-luna")
+                    and params.get("effort") == "low"
+                    and isinstance(params.get("clientUserMessageId"), str)
+                    and params.get("approvalPolicy") == "never"
+                    and params.get("permissions") == "coding-wife-support-zero"
+                    and params.get("environments") == []
+                    and params.get("runtimeWorkspaceRoots") == []
+                    and isinstance(params.get("outputSchema"), dict)
+                    and params["outputSchema"].get("additionalProperties") is False
+                    and required_output == expected_output
                     and "serviceTier" not in params
                     and "collaborationMode" not in params
                     and "multiAgentMode" not in params
@@ -899,7 +939,11 @@ def main():
                     )
                 valid = valid and workspace_roots_valid and write_policy_valid
             expected_skill = (
-                "coding-wife-explain-commit"
+                (
+                    "coding-wife-direct-presence"
+                    if presence_support
+                    else "coding-wife-explain-commit"
+                )
                 if EXECUTION_CLASS == "support"
                 else "coding-wife-commit-work"
             )
@@ -950,19 +994,34 @@ def main():
                     envelope = json.loads(input_text)
                 except (json.JSONDecodeError, TypeError):
                     envelope = {}
-                probe_turn = envelope.get("requestId") == "support-release-probe"
-                policy_probe_turn = (
-                    envelope.get("requestId") == "support-release-policy-probe"
-                )
+                client_message_id = params.get("clientUserMessageId")
+                probe_turn = client_message_id == "support-release-probe"
+                policy_probe_turn = client_message_id == "support-release-policy-probe"
                 if probe_turn:
                     record("support_probe_production_envelope_ok")
-                    output = support_explanation("ja")
+                    output = (
+                        support_presence_direction("ja", envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation("ja")
+                    )
                 elif policy_probe_turn:
                     record("support_probe_plan_policy_event")
-                    output = support_explanation("ja")
+                    output = (
+                        support_presence_direction("ja", envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation("ja")
+                    )
                 else:
-                    locale = envelope.get("evidence", {}).get("locale", "ja")
-                    output = support_explanation(locale)
+                    locale = (
+                        envelope.get("locale", "ja")
+                        if presence_support
+                        else envelope.get("evidence", {}).get("locale", "ja")
+                    )
+                    output = (
+                        support_presence_direction(locale, envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation(locale)
+                    )
                     if MODE == "support_invalid_output":
                         output = '{"schemaVersion":1,"locale":"ja"}'
                 turn_result = {"turn": {"id": "support-turn-fixture", "status": "inProgress"}}

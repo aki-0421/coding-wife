@@ -4,10 +4,14 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 use super::attachment::ResolvedAttachment;
-use super::bundled_skill::{ResolvedBundledSkill, COMMIT_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME};
+use super::bundled_skill::{
+    ResolvedBundledSkill, COMMIT_SKILL_NAME, DIRECT_PRESENCE_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME,
+};
 #[cfg(test)]
 use super::types::CODEX_COMMIT_EXPLAINER_MODEL;
-use super::types::{ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL};
+use super::types::{
+    ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutboundProfile {
@@ -624,6 +628,23 @@ pub(crate) fn commit_explanation_output_schema(locale: &str) -> Value {
     })
 }
 
+pub(crate) fn presence_direction_output_schema(locale: &str) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "locale", "utterance", "cue"],
+        "properties": {
+            "schemaVersion": {"type": "integer", "const": 1},
+            "locale": {"type": "string", "const": locale},
+            "utterance": {"type": "string", "minLength": 1, "maxLength": 160},
+            "cue": {
+                "type": "string",
+                "enum": ["neutral", "working", "asking", "success", "warning", "error"]
+            }
+        }
+    })
+}
+
 fn bounded_string_array_schema() -> Value {
     json!({
         "type": "array",
@@ -660,6 +681,35 @@ pub(crate) fn support_turn_start_params(
         "environments": [],
         "runtimeWorkspaceRoots": [],
         "outputSchema": commit_explanation_output_schema(locale),
+    }))
+}
+
+pub(crate) fn presence_turn_start_params(
+    thread_id: &str,
+    cwd: &Path,
+    client_user_message_id: &str,
+    input_text: &str,
+    locale: &str,
+    support_skill: &ResolvedBundledSkill,
+) -> Result<Value, TurnContractError> {
+    if support_skill.name != DIRECT_PRESENCE_SKILL_NAME {
+        return Err(TurnContractError::SkillClass);
+    }
+    Ok(json!({
+        "threadId": thread_id,
+        "clientUserMessageId": client_user_message_id,
+        "input": [
+            {"type": "text", "text": input_text, "text_elements": []},
+            {"type": "skill", "name": support_skill.name, "path": support_skill.path}
+        ],
+        "model": CODEX_PRESENCE_DIRECTOR_MODEL,
+        "effort": "low",
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": "never",
+        "permissions": "coding-wife-support-zero",
+        "environments": [],
+        "runtimeWorkspaceRoots": [],
+        "outputSchema": presence_direction_output_schema(locale),
     }))
 }
 
@@ -909,6 +959,18 @@ mod tests {
             version: "1.0.0".to_owned(),
             content_digest: format!("sha256:{}", "b".repeat(64)),
             path: PathBuf::from("/app-bundle/resources/skills/coding-wife-explain-commit/SKILL.md"),
+            verified_entrypoint: std::sync::Arc::from([]),
+        }
+    }
+
+    fn presence_skill() -> ResolvedBundledSkill {
+        ResolvedBundledSkill {
+            name: DIRECT_PRESENCE_SKILL_NAME.to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "c".repeat(64)),
+            path: PathBuf::from(
+                "/app-bundle/resources/skills/coding-wife-direct-presence/SKILL.md",
+            ),
             verified_entrypoint: std::sync::Arc::from([]),
         }
     }
@@ -1244,6 +1306,69 @@ mod tests {
     }
 
     #[test]
+    fn presence_turn_pins_luna_and_the_strict_direction_schema() {
+        let params = presence_turn_start_params(
+            "thread",
+            Path::new("/private/support"),
+            "presence-request",
+            r#"{"schemaVersion":1,"locale":"ja","trigger":"decision_wait","semanticState":"asking","retrying":false,"elapsedBucket":"none"}"#,
+            "ja",
+            &presence_skill(),
+        )
+        .expect("presence turn contract");
+        let input = params["input"].as_array().expect("presence input");
+        let skills = input
+            .iter()
+            .filter(|item| item["type"] == "skill")
+            .collect::<Vec<_>>();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["name"], DIRECT_PRESENCE_SKILL_NAME);
+        assert_eq!(params["model"], CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(params["effort"], "low");
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["permissions"], "coding-wife-support-zero");
+        assert_eq!(params["environments"], json!([]));
+        assert_eq!(params["runtimeWorkspaceRoots"], json!([]));
+        assert_eq!(
+            params["outputSchema"],
+            presence_direction_output_schema("ja")
+        );
+        assert!(params.get("tools").is_none());
+
+        assert_eq!(
+            presence_turn_start_params(
+                "thread",
+                Path::new("/private/support"),
+                "presence-request",
+                "{}",
+                "ja",
+                &explain_skill(),
+            ),
+            Err(TurnContractError::SkillClass)
+        );
+    }
+
+    #[test]
+    fn presence_direction_schema_is_closed_and_bounded() {
+        let schema = presence_direction_output_schema("en");
+
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["required"],
+            json!(["schemaVersion", "locale", "utterance", "cue"])
+        );
+        assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+        assert_eq!(schema["properties"]["locale"]["const"], "en");
+        assert_eq!(schema["properties"]["utterance"]["minLength"], 1);
+        assert_eq!(schema["properties"]["utterance"]["maxLength"], 160);
+        assert_eq!(
+            schema["properties"]["cue"]["enum"],
+            json!(["neutral", "working", "asking", "success", "warning", "error"])
+        );
+    }
+
+    #[test]
     fn turn_projects_validated_images_and_files_without_an_empty_text_item() {
         let attachments = [
             ResolvedAttachment::LocalImage {
@@ -1375,6 +1500,26 @@ mod tests {
                 thread_id: "support-thread".to_owned()
             })
         );
+        let mut luna_response = response.clone();
+        luna_response["model"] = json!(CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(
+            parse_support_thread_policy_response(
+                &luna_response,
+                &cwd,
+                CODEX_PRESENCE_DIRECTOR_MODEL,
+                Some("openai"),
+            ),
+            Ok(SupportThreadPolicyResponse {
+                thread_id: "support-thread".to_owned()
+            })
+        );
+        assert!(parse_support_thread_policy_response(
+            &luna_response,
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
 
         for pointer in [
             "/model",

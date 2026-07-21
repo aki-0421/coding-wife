@@ -1,0 +1,6 @@
+interface:
+  display_name: "Direct Character Presence"
+  short_description: "Create a safe caption and semantic cue from pathless state"
+  default_prompt: "Use $coding-wife-direct-presence to direct this semantic presence state."
+policy:
+  allow_implicit_invocation: false

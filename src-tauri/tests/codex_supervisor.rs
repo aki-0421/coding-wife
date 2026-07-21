@@ -12,8 +12,9 @@ use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
 use coding_wife_lib::codex::support::{
-    CommitExplanationTrigger, SupportExplainRequest, SupportModelRole, SupportRuntime,
-    SupportRuntimeError, SUPPORT_MAX_SESSION_CAPACITY,
+    CommitExplanationTrigger, PresenceDirectorInputV1, PresenceElapsedBucket, PresenceLocale,
+    PresenceSemanticState, PresenceTrigger, SupportExplainRequest, SupportModelRole,
+    SupportPresenceRequest, SupportRuntime, SupportRuntimeError, SUPPORT_MAX_SESSION_CAPACITY,
 };
 use coding_wife_lib::codex::types::{
     BinarySource, CapabilityState, ChildState, CodexFallbackDecisionRequest, CodexHealth,
@@ -506,6 +507,22 @@ fn support_request(
     }
 }
 
+fn support_presence_request(request_id: &str) -> SupportPresenceRequest {
+    SupportPresenceRequest {
+        request_id: request_id.to_owned(),
+        workspace_id: "workspace".to_owned(),
+        workspace_generation: 1,
+        input: PresenceDirectorInputV1 {
+            schema_version: 1,
+            locale: PresenceLocale::Ja,
+            trigger: PresenceTrigger::DecisionWait,
+            semantic_state: PresenceSemanticState::Asking,
+            retrying: false,
+            elapsed_bucket: PresenceElapsedBucket::None,
+        },
+    }
+}
+
 fn attachment_snapshot_root(fixture: &FixtureEnvironment) -> PathBuf {
     fixture.app_data.join("codex").join("attachment-snapshots")
 }
@@ -979,6 +996,65 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
     assert_eq!(state.matches("support_probe_plan_policy_event").count(), 1);
     assert!(!state.contains("support_skill_exactly_once_invalid"));
     assert!(!state.contains("commit_skill_exactly_once_ok"));
+    assert!(!state.contains("coding-wife-commit-work"));
+}
+
+#[tokio::test]
+async fn dedicated_presence_runtime_proves_luna_and_returns_strict_direction() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct_presence(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "isolated presence runtime: {error:?}; state={}",
+            std::fs::read_to_string(&fixture.state).unwrap_or_default()
+        )
+    });
+
+    assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::PresenceDirector
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-luna");
+    assert_eq!(runtime.audit().skill_name, "coding-wife-direct-presence");
+    assert_eq!(runtime.audit().skill_version, "1.0.0");
+    assert!(runtime.audit().malicious_canary_passed);
+
+    let result = runtime
+        .direct_presence(support_presence_request("presence-request-1"))
+        .await
+        .expect("strict presence result");
+    assert_eq!(result.direction.locale, PresenceLocale::Ja);
+    assert_eq!(
+        result.direction.cue,
+        coding_wife_lib::codex::support::PresenceCue::Asking
+    );
+    assert_eq!(result.usage.total_tokens, 30);
+    runtime.shutdown().await.expect("presence support cleanup");
+
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("support_sandbox_denied"));
+    assert_eq!(state.matches("support_thread_contract_ok").count(), 2);
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
+    assert_eq!(
+        state
+            .matches("support_probe_production_envelope_ok")
+            .count(),
+        1
+    );
+    assert_eq!(state.matches("support_probe_plan_policy_event").count(), 1);
+    assert!(!state.contains("support_skill_exactly_once_invalid"));
+    assert!(!state.contains("coding-wife-explain-commit"));
     assert!(!state.contains("coding-wife-commit-work"));
 }
 
